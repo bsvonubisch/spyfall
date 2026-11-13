@@ -7,7 +7,7 @@ Built with HTML, CSS, JavaScript, Firebase Authentication, Cloud Firestore, and 
 ## How to play
 
 1. Enter your name and create a room. Share the QR code or invite link.
-2. Gather **3–12 players**. The host sets the round length (**2–20 minutes**), possible locations (**3–40**), and voting rule.
+2. Gather **2–12 players** (two-player mode is intended for testing). The host sets the round length (**2–20 minutes**), possible locations (**3–40**), and voting rule.
 3. The host starts the round. One randomly chosen player is the spy. Everyone else sees the same secret location on their phone.
 4. Ask and answer questions **out loud**. Keep your location secret and listen for suspicious answers.
 5. Make your move on your phone:
@@ -16,7 +16,7 @@ Built with HTML, CSS, JavaScript, Firebase Authentication, Cloud Firestore, and 
    - **Time runs out:** the spy wins.
 6. The result reveals the spy and location. The host returns everyone to the lobby for another round.
 
-Majority voting requires more than half of all players to vote for the same person. Unanimous voting requires everyone except the accused. The spy can also vote. The first accepted round-ending action is final.
+Majority voting requires more than half of all players to vote for the same person. Unanimous voting requires everyone except the accused. For two-player tests, one vote ends the round under either rule. The spy can also vote. The first accepted round-ending action is final.
 
 ## Features
 

@@ -23,7 +23,7 @@ service cloud.firestore {
         + voteAt(r,8,target) + voteAt(r,9,target) + voteAt(r,10,target) + voteAt(r,11,target);
     }
     function passed(r, target) {
-      return r.settings.voting == 'unanimous' ? count(r,target) >= r.memberIds.size() - 1 : count(r,target) > r.memberIds.size() / 2;
+      return r.memberIds.size() == 2 ? count(r,target) >= 1 : r.settings.voting == 'unanimous' ? count(r,target) >= r.memberIds.size() - 1 : count(r,target) > r.memberIds.size() / 2;
     }
     match /rooms/{code} {
       // A room code grants access to the non-secret lobby; listing rooms is denied.
@@ -59,7 +59,7 @@ service cloud.firestore {
       function start() {
         let old = resource.data; let next = request.resource.data;
         let secret = getAfter(/databases/$(database)/documents/rooms/$(code)/secrets/current).data;
-        return host(old) && old.status == 'lobby' && old.memberIds.size() >= 3
+        return host(old) && old.status == 'lobby' && old.memberIds.size() >= 2
           && changed(['status','roundId','startedAt','votes','result'])
           && next.status == 'active' && next.roundId == old.roundId + 1 && next.startedAt == request.time
           && next.votes == {} && next.result == null && secret.roundId == next.roundId;

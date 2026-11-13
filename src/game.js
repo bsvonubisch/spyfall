@@ -4,7 +4,7 @@ export const DEFAULT_LOCATIONS = ['Airport', 'Beach', 'Casino', 'Circus', 'Cruis
 export const DEFAULT_SETTINGS = { minutes: 8, voting: 'majority', locations: DEFAULT_LOCATIONS };
 const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 function random(n) { const values = new Uint32Array(1); const limit = Math.floor(2 ** 32 / n) * n; do { crypto.getRandomValues(values); } while (values[0] >= limit); return values[0] % n; }
-export const threshold = room => room.settings.voting === 'unanimous' ? room.memberIds.length - 1 : Math.floor(room.memberIds.length / 2) + 1;
+export const threshold = room => room.memberIds.length === 2 ? 1 : room.settings.voting === 'unanimous' ? room.memberIds.length - 1 : Math.floor(room.memberIds.length / 2) + 1;
 function check(condition, message) { if (!condition) throw new Error(message); }
 export function validSettings(value) {
   check(Number.isInteger(value?.minutes) && value.minutes >= 2 && value.minutes <= 20, 'Choose 2–20 minutes.');
@@ -70,7 +70,7 @@ async function executeOnce(db, uid, data) {
       check(room.status === 'lobby', 'Rules can only change in the lobby.');
       tx.update(ref, { settings: validSettings(data.settings) });
     } else if (type === 'start') {
-      check(room.status === 'lobby' && room.memberIds.length >= 3, 'At least 3 players must be in the lobby.');
+      check(room.status === 'lobby' && room.memberIds.length >= 2, 'At least 2 players must be in the lobby.');
       const secret = { spyId: room.memberIds[random(room.memberIds.length)], location: room.settings.locations[random(room.settings.locations.length)], roundId: room.roundId + 1 };
       tx.set(doc(ref, 'secrets', 'current'), secret);
       for (const id of room.memberIds) tx.set(doc(ref, 'roles', id), { roundId: secret.roundId, isSpy: id === secret.spyId, location: id === secret.spyId ? null : secret.location });

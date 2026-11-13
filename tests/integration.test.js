@@ -2,8 +2,9 @@ import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
-import { doc, getDoc, getDocs, collection, updateDoc, setDoc, Timestamp, writeBatch } from 'firebase/firestore';
+import { doc, getDoc, getDocs, collection, updateDoc, Timestamp, onSnapshot, disableNetwork, enableNetwork } from 'firebase/firestore';
 import { execute, DEFAULT_SETTINGS, resolveResult, validSettings } from '../src/game.js';
+import { membershipState } from '../src/room-view.js';
 
 let env;
 const db = id => env.authenticatedContext(id).firestore();
@@ -100,4 +101,44 @@ test('settings reject invalid durations, duplicate locations, and invalid voting
   assert.throws(() => validSettings({ ...DEFAULT_SETTINGS, minutes: 0 }));
   assert.throws(() => validSettings({ ...DEFAULT_SETTINGS, voting: 'anything' }));
   assert.throws(() => validSettings({ ...DEFAULT_SETTINGS, locations: ['Beach', 'beach', 'Train'] }));
+});
+test('two-player testing can start and resolve a vote; one player cannot start', async () => {
+  const code = await lobby(1);
+  await assert.rejects(execute(db('p0'), 'p0', { action: 'start', code }));
+  await execute(db('p1'), 'p1', { action: 'join', code, name: 'Player 1' });
+  const { spy, civilian } = await start(code);
+  await execute(db(civilian.id), civilian.id, { action: 'vote', code, roundId: 1, target: spy.id });
+  const room = (await getDoc(doc(db('p0'), 'rooms', code))).data();
+  assert.equal(room.status, 'ended');
+  assert.equal(room.result.accusedId, spy.id);
+});
+test('a stale cached lobby does not eject a joined player; a confirmed removal still does', async () => {
+  const code = await lobby(1);
+  const phone = db('phone');
+  const ref = doc(phone, 'rooms', code);
+  await getDoc(ref); // Cache the lobby before this phone is a member.
+  await disableNetwork(phone);
+  await execute(db('phone'), 'phone', { action: 'join', code, name: 'Phone' });
+  let stop;
+  const states = [];
+  let resolveJoined, resolveRemoved;
+  const joined = new Promise(resolve => { resolveJoined = resolve; });
+  const removed = new Promise(resolve => { resolveRemoved = resolve; });
+  const initial = new Promise((resolve, reject) => {
+    stop = onSnapshot(ref, { includeMetadataChanges: true }, snap => {
+      const value = membershipState(snap, 'phone'); states.push(value);
+      resolve(value);
+      if (value === 'joined') resolveJoined();
+      if (value === 'removed') resolveRemoved();
+    }, reject);
+  });
+  try {
+    assert.equal(await initial, 'pending');
+    await enableNetwork(phone);
+    await joined;
+    assert.deepEqual(states.slice(0, 2), ['pending', 'joined']);
+    await execute(db('p0'), 'p0', { action: 'remove', code, target: 'phone' });
+    await removed;
+    assert.equal(states.at(-1), 'removed');
+  } finally { stop(); await enableNetwork(phone); }
 });
