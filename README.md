@@ -7,13 +7,13 @@ Built with HTML, CSS, JavaScript, Firebase Authentication, Cloud Firestore, and 
 ## How to play
 
 1. Enter your name and create a room. Share the QR code or invite link.
-2. Gather **2–15 players** (two-player mode is intended for testing). The host sets the round length (**2–20 minutes**), possible locations (**3–40**), voting rule, and **1–7 spies** (default: one). Multiple spies require at least twice as many players as spies, plus one: two spies need five players, seven need fifteen.
+2. Gather **2–15 players** (two-player mode is intended for testing). The host sets the round length (**2–20 minutes**), possible locations (**3–40**), voting rule, and **1–3 spies** (default: one). Multi-spy games require four players per spy: two spies need eight players, three need twelve. One spy can still be tested with two players.
 3. The host starts the round. Randomly chosen spies see their role without the location or other spies' identities. Everyone else sees the same secret location on their phone.
 4. Ask and answer questions **out loud**. Keep your location secret and listen for suspicious answers.
 5. Make your move on your phone:
    - **Spies:** any uncaught spy can guess. A correct guess wins for the spy team; a wrong guess gives the group the win.
    - **Players:** vote for someone else. Votes can change until an accusation passes. Catch **every spy** to win. After catching a spy, votes clear and play continues with the same timer; caught spies can watch but cannot vote or guess. Accuse an innocent player and the spies win.
-   - **Time runs out:** any uncaught spies win for their team.
+   - **Timer:** a chime and voting prompt mark the final minute. At zero, a sound plays but the round continues. The host chooses **End round** to award the spies the win, or **Cancel round** to return to the lobby without scores. Guesses and decisive votes still end the round immediately.
 6. The result reveals all spies and the location. The host returns everyone to the lobby for another round.
 
 Majority voting requires more than half of the players still in play to vote for the same person. Unanimous voting requires everyone still in play except the accused. When only two players remain eligible, one vote confirms an accusation under either rule. Spies can also vote until caught. A confirmed accusation briefly locks voting while any connected member resolves it, reading only the accused player's role. Other roles and the location stay private until the round ends. The first accepted round-ending action is final.
@@ -29,12 +29,12 @@ Majority voting requires more than half of the players still in play to vote for
 - Locations are always visible on the round screen. The spy can tap a location to guess; everyone, including the spy, can vote for another player.
 - Optional Question ideas show broad prompts that work across several locations. Cycle through 21 prompts; the suggestions never use the secret location or player role.
 - Classic (the original default), Everyday places, Around the world, and Wild adventures location sets. Hosts can customize each list with Add/Remove controls and change duration and voting rules in the lobby.
-- An original spy-film victory sting when the spy guesses correctly, with a per-device Sound on/off control. Mobile browsers require an interaction to enable audio; sounds are not queued while the page is hidden or replayed when an old result is reopened.
-- A separate sound marks server-confirmed timer expiry. Illustrated avatars are generated from player IDs and remain consistent across devices and rounds; they never indicate a player's role.
-- Anonymous sign-in: no player accounts or passwords to create.
+- The supplied [James Bond Spy Chord recording by Nicolas](https://www.youtube.com/watch?v=AejxyoO6ILo) when the spy guesses correctly, with a per-device Sound on/off control. Mobile browsers require an interaction to enable audio; sounds are not queued while the page is hidden or replayed when an old result is reopened.
+- Separate sounds mark votes, the final minute, the advisory timer reaching zero, and other round endings. Illustrated avatars are saved as a portrait seed in each Firestore profile. **Edit profile → New avatar** previews a new portrait; **Save profile** saves it with the name. Avatars appear in rosters, results, player confirmations, and leaderboards, and never indicate a role.
+- Anonymous sign-in: no passwords to create. Firestore profiles save names, avatars, wins, and rounds played. The identity belongs to this browser; clearing site data or changing devices starts a new profile.
 - Rejoin the same room after refreshing, using the same browser identity.
 - Host transfers to the next player if the host leaves the lobby.
-- Navigation stays at the top while scrolling, with the round timer, sound toggle, host-only Stop round, and Exit controls. Stopping returns everyone to the lobby; exiting during a round also resets it and removes the exiting player, transferring the host if necessary.
+- Navigation stays at the top while scrolling, with the round timer, sound toggle, host-only Round controls, and Exit controls. Cancelling returns everyone to the lobby without scores; exiting during a round also resets it and removes the exiting player, transferring the host if necessary.
 
 ## Free Firebase setup
 
@@ -52,9 +52,17 @@ The Firebase web configuration identifies the app; it is not an administrator cr
 
 In **Settings → Secrets and variables → Actions → Repository secrets**, create **`FIREBASE_CONFIG`** with the Firebase web configuration as a JSON object. Use a repository secret, not an environment secret. `.github/workflows/build.yml` supplies it to Vite as `VITE_FIREBASE_CONFIG` during builds on `main` or manual runs. It does not deploy automatically or contain administrator credentials.
 
-For local development and manual deployments, copy `.env.example` to `.env.local` and paste the same JSON into the single-quoted value. `.env.local` is ignored by Git. The emulator mode uses a demo configuration and needs no secret. Previous commits may still contain the original web configuration; removing it from current source does not rewrite Git history.
+For local development and manual deployments, copy `.env.example` to `.env.local` and paste the same JSON into the single-quoted value. `.env.local` is ignored by Git. The emulator mode uses a demo configuration and needs no secret. The repository history has been rewritten to replace the former embedded configuration with environment-based loading. Re-clone older checkouts before making further changes; old clones and GitHub caches may still contain the earlier objects.
 
-Spark has usage limits. Exceeding a free quota can interrupt the game until it resets; this project does not automatically upgrade the plan. Check the [current Firebase quotas and pricing](https://firebase.google.com/pricing). Timers run on the phone and do not write to Firestore every second. Each phone listens only to its room and its own role.
+Spark has usage limits. Exceeding a free quota can interrupt the game until it resets; this project does not automatically upgrade the plan. Check the [current Firebase quotas and pricing](https://firebase.google.com/pricing). Timers run on the phone and do not write to Firestore every second. Each phone listens only to its room and its own role. Leaderboards load on demand, with at most 25 rows. Completing a round archives one verified result and writes one award, profile total, and room total per player.
+
+## Profiles and leaderboards
+
+- **This room** ranks completed-round scores for the room code; **Overall** ranks all saved profiles. Open Leaderboards from the lobby or results, or the overall board from the home screen.
+- Every member of the winning team earns **1 point**. All participants get one round played, including caught spies. Stopped/cancelled rounds do not count. Equal points share a rank.
+- Scores begin with rounds started after this update; earlier rounds cannot be reconstructed.
+- A verified result is archived before a completed round is cleared. Each player has an immutable award for that round, so retries and simultaneous phones cannot count it twice. Security rules require the matching profile and room totals to update together. Any connected participant can credit offline teammates. No Cloud Functions are used.
+- Profiles contain a display name, avatar seed, wins, rounds played, last awarded round ID, and update time. The public standings expose no email address. Signed-in players can read profiles; only the owner can change their name/avatar, and scores require a verified award. Archived results and award records are retained to prevent replay; include them in storage maintenance planning.
 
 ## Develop
 
@@ -75,7 +83,7 @@ Install Java 21+ for the Firestore emulator, then run:
 pnpm test:emulators
 ```
 
-The integration tests exercise actual Firestore security rules: private reads, forged votes, unauthorized host actions, guessing, simultaneous votes, unanimity, timeout enforcement, resets, host transfer, capacity, and a 15-player deal. They also cover seven-spy dealing, catching every spy, excluding caught players, restricted accusation resolution, insufficient players, and name-edit permissions.
+The integration tests exercise actual Firestore security rules: private reads, forged votes, unauthorized host actions, guessing, simultaneous votes, unanimity, host-only ending after an advisory timer, resets, host transfer, capacity, and a 15-player deal. They also cover three-spy dealing, catching every spy, excluding caught players, restricted accusation resolution, insufficient players, name/avatar permissions, concurrent score deduplication, forged-score rejection, and per-room versus overall totals.
 
 ## Browser notifications: proposed plan
 
@@ -121,16 +129,20 @@ Deployment requires an authorized Firebase project account; the public web confi
 
 This is a **trusted-host party game**. To stay on the free plan without a server, the host's browser randomly deals the roles and writes them in one transaction. The host could inspect or modify that dealing process using developer tools. This is not suitable for competitive or prize-bearing play with an untrusted host.
 
-Firestore rules prevent ordinary clients from reading other players' role documents, reading the answer before the round ends, changing another player's vote, guessing as a non-spy, changing rules mid-round, or ending the timer early. The spy receives no secret location in their role document. The answer becomes readable to room members only after a valid end condition. Security does not depend on hiding controls in the UI.
+Firestore rules prevent ordinary clients from reading other players' role documents, reading the answer before the round ends, changing another player's vote, guessing as a non-spy, changing rules mid-round, or manually ending a round without being its host. The spy receives no secret location in their role document. The answer becomes readable to room members only after a valid end condition. Security does not depend on hiding controls in the UI.
 
 Anyone signed in anonymously who knows a room code can read its non-secret lobby, player names, settings, and votes. Room listing is denied. Do not use sensitive information as a name or custom location.
 
-Rooms accept changes for 24 hours. Old rooms are not automatically deleted: periodically remove unused rooms and their subcollections in the Firebase console to keep storage within the free quota. The timer's displayed countdown uses the phone clock, while Firestore enforces the deadline using server time. If all phones disconnect, the next connected phone finalizes the expired round. Closing a browser leaves the player on the roster; the explicit Exit button removes them and resets any ongoing round. If the host closes the browser without exiting, they must reconnect to start the next round.
+Rooms accept changes for 24 hours. Old rooms are not automatically deleted: periodically remove unused rooms and their subcollections in the Firebase console to keep storage within the free quota. The advisory countdown uses the phone clock and shared round start time. Reaching zero never writes an automatic result. The host ends the round, or a valid guess or accusation resolves it. Closing a browser leaves the player on the roster; the explicit Exit button removes them and resets any ongoing round. If the host closes the browser without exiting, they must reconnect to start the next round.
 
 ## Repository layout
 
 - `src/app.js` — screens, QR invitations, live subscriptions, and interactions.
 - `src/game.js` — Firestore transactions and game flow.
+- `src/scores.js` — profiles, verified results, and idempotent leaderboard awards.
+- `src/dialog.js` — shared keyboard-aware modal positioning.
+- `src/round-clock.js` — advisory countdown cues.
+- `src/assets/spy-chord.mp3` — trimmed supplied sound recording (source linked above).
 - `src/firebase.js` — environment-based Firebase initialization and anonymous identity.
 - `src/style.css` — responsive mobile design.
 - `firestore.rules` — authorization and round validation.

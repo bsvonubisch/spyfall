@@ -1,10 +1,12 @@
 import { doc, runTransaction, serverTimestamp, deleteField } from 'firebase/firestore';
 
 import { DEFAULT_LOCATIONS } from './locations.js';
+import { profileData, settleRound } from './scores.js';
 export { DEFAULT_LOCATIONS } from './locations.js';
 export const DEFAULT_SETTINGS = { minutes: 8, voting: 'majority', spies: 1, locations: DEFAULT_LOCATIONS };
 export const MAX_PLAYERS = 15;
-export const requiredPlayers = spies => spies === 1 ? 2 : spies * 2 + 1;
+export const MAX_SPIES = 3;
+export const requiredPlayers = spies => spies === 1 ? 2 : spies * 4;
 export const eligiblePlayers = room => room.memberIds.filter(id => !(room.caughtIds || []).includes(id));
 const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 function random(n) { const values = new Uint32Array(1); const limit = Math.floor(2 ** 32 / n) * n; do { crypto.getRandomValues(values); } while (values[0] >= limit); return values[0] % n; }
@@ -13,7 +15,7 @@ function check(condition, message) { if (!condition) throw new Error(message); }
 export function validSettings(value) {
   check(Number.isInteger(value?.minutes) && value.minutes >= 2 && value.minutes <= 20, 'Choose 2–20 minutes.');
   check(['majority', 'unanimous'].includes(value.voting), 'Choose a voting rule.');
-  check(Number.isInteger(value.spies ?? 1) && (value.spies ?? 1) >= 1 && (value.spies ?? 1) <= 7, 'Choose 1–7 spies.');
+  check(Number.isInteger(value.spies ?? 1) && (value.spies ?? 1) >= 1 && (value.spies ?? 1) <= MAX_SPIES, 'Choose 1–3 spies.');
   check(Array.isArray(value.locations) && value.locations.length >= 3 && value.locations.length <= 40, 'Choose 3–40 locations.');
   check(value.locations.every(l => typeof l === 'string' && l.trim().length > 0 && l.length <= 40), 'Use location names of 1–40 characters.');
   check(new Set(value.locations.map(l => l.toLowerCase())).size === value.locations.length, 'Each location must be different.');
@@ -24,10 +26,11 @@ export function normalizeRoom(room) {
 }
 export function resolveResult(result, secret) {
   const spyIds = secret.spyIds || [secret.spyId];
-  const winner = result.reason === 'timeout' ? 'spy' : result.reason === 'guess' ? (result.guess === secret.location ? 'spy' : 'players') : spyIds.includes(result.accusedId) ? 'players' : 'spy';
+  const winner = ['timeout', 'host'].includes(result.reason) ? 'spy' : result.reason === 'guess' ? (result.guess === secret.location ? 'spy' : 'players') : spyIds.includes(result.accusedId) ? 'players' : 'spy';
   return { ...result, ...secret, spyIds, winner };
 }
 export async function execute(db, uid, data) {
+  if (['reset', 'leave'].includes(data.action)) await settleRound(db, uid, data.code);
   // A simultaneous round-ending write can invalidate rules before Firestore
   // reports the transaction conflict. Re-read once more rather than replaying it.
   for (let attempt = 0; ; attempt++) {
@@ -37,7 +40,8 @@ export async function execute(db, uid, data) {
       return result;
     }
     catch (error) {
-      if (error.code !== 'permission-denied' || !['vote','guess','expire','resolve-vote'].includes(data.action) || attempt >= 3) throw error;
+      if (error.code !== 'permission-denied' || !['vote','guess','resolve-vote'].includes(data.action) || attempt >= MAX_PLAYERS) throw error;
+      await new Promise(resolve => setTimeout(resolve, 20 * (attempt + 1)));
     }
   }
 }
@@ -51,6 +55,9 @@ async function executeOnce(db, uid, data) {
       const ref = doc(db, 'rooms', code);
       const created = await runTransaction(db, async tx => {
         if ((await tx.get(ref)).exists()) return false;
+        const profile = doc(db, 'profiles', uid), profileSnap = await tx.get(profile);
+        player.avatarSeed = profileSnap.data()?.avatarSeed || uid;
+        tx.set(profile, { ...(profileSnap.data() || profileData(uid, player.name)), avatarSeed: player.avatarSeed, name: player.name, updatedAt: serverTimestamp() });
         tx.set(ref, { hostId: uid, memberIds: [uid], players: { [uid]: player }, status: 'lobby', settings: DEFAULT_SETTINGS, roundId: 0, votes: {}, createdAt: serverTimestamp() });
         return true;
       });
@@ -71,16 +78,23 @@ async function executeOnce(db, uid, data) {
       check(room.memberIds.length < MAX_PLAYERS, 'This room is full (15 players maximum).');
       const playerName = name();
       check(!Object.values(room.players).some(p => p.name.toLowerCase() === playerName.toLowerCase()), 'That name is taken. Try another.');
-      tx.update(ref, { memberIds: [...room.memberIds, uid], players: { ...room.players, [uid]: { id: uid, name: playerName } } });
+      const profile = doc(db, 'profiles', uid), profileSnap = await tx.get(profile);
+      const avatarSeed = profileSnap.data()?.avatarSeed || uid;
+      tx.set(profile, { ...(profileSnap.data() || profileData(uid, playerName)), name: playerName, avatarSeed, updatedAt: serverTimestamp() });
+      tx.update(ref, { memberIds: [...room.memberIds, uid], players: { ...room.players, [uid]: { id: uid, name: playerName, avatarSeed } } });
       return { code: data.code };
     }
     check(room.memberIds.includes(uid), 'You are not in this room.');
-    if (['settings', 'start', 'reset', 'stop', 'remove'].includes(type)) check(room.hostId === uid, 'Only the host can do that.');
+    if (['settings', 'start', 'reset', 'stop', 'end', 'remove'].includes(type)) check(room.hostId === uid, 'Only the host can do that.');
     if (type === 'rename') {
       check(room.status === 'lobby', 'Names can only change in the lobby.');
       const playerName = name();
       check(!Object.values(room.players).some(p => p.id !== uid && p.name.toLowerCase() === playerName.toLowerCase()), 'That name is taken. Try another.');
-      tx.update(ref, { players: { ...room.players, [uid]: { id: uid, name: playerName } } });
+      const profile = doc(db, 'profiles', uid), profileSnap = await tx.get(profile);
+      const avatarSeed = data.avatarSeed || profileSnap.data()?.avatarSeed || room.players[uid].avatarSeed || uid;
+      check(typeof avatarSeed === 'string' && avatarSeed.length <= 64, 'Choose another avatar.');
+      tx.set(profile, { ...(profileSnap.data() || profileData(uid, playerName)), name: playerName, avatarSeed, updatedAt: serverTimestamp() });
+      tx.update(ref, { players: { ...room.players, [uid]: { id: uid, name: playerName, avatarSeed } } });
     } else if (type === 'settings') {
       check(room.status === 'lobby', 'Rules can only change in the lobby.');
       tx.update(ref, { settings: validSettings(data.settings) });
@@ -92,7 +106,10 @@ async function executeOnce(db, uid, data) {
       const secret = { spyIds, location: room.settings.locations[random(room.settings.locations.length)], roundId: room.roundId + 1 };
       tx.set(doc(ref, 'secrets', 'current'), secret);
       for (const id of room.memberIds) tx.set(doc(ref, 'roles', id), { roundId: secret.roundId, isSpy: spyIds.includes(id), location: spyIds.includes(id) ? null : secret.location });
-      tx.update(ref, { status: 'active', roundId: secret.roundId, startedAt: serverTimestamp(), votes: {}, caughtIds: [], result: null });
+      tx.update(ref, { status: 'active', roundId: secret.roundId, roundKey: crypto.randomUUID(), startedAt: serverTimestamp(), votes: {}, caughtIds: [], result: null });
+    } else if (type === 'end') {
+      check(['active', 'accusing'].includes(room.status), 'There is no active round.');
+      tx.update(ref, { status: 'ended', result: { reason: 'host' } });
     } else if (type === 'reset' || type === 'stop') {
       check(type === 'stop' ? ['active','accusing'].includes(room.status) : room.status === 'ended', 'There is no round to reset.');
       for (const id of room.memberIds) tx.delete(doc(ref, 'roles', id));
@@ -112,14 +129,12 @@ async function executeOnce(db, uid, data) {
       else tx.update(ref, { memberIds, players, hostId: room.hostId === target ? memberIds[0] : room.hostId,
         ...(room.status !== 'lobby' ? { status: 'lobby', votes: {}, caughtIds: [], result: null, startedAt: deleteField() } : {}) });
     } else {
-      check(['guess', 'vote', 'expire', 'resolve-vote'].includes(type), 'Unknown action.');
+      check(['guess', 'vote', 'resolve-vote'].includes(type), 'Unknown action.');
       check(room.roundId === data.roundId, 'The round changed. Please try again.');
       if (room.status === 'ended') return { code: data.code };
       if (type === 'resolve-vote' && room.status !== 'accusing') return { code: data.code };
       check(['active','accusing'].includes(room.status), 'There is no active round.');
-      const expired = Date.now() >= room.startedAt.toMillis() + room.settings.minutes * 60000;
-      if (expired) tx.update(ref, { status: 'ended', result: { reason: 'timeout' } });
-      else if (type === 'resolve-vote') {
+      if (type === 'resolve-vote') {
         const target = room.result.accusedId;
         const role = (await tx.get(doc(ref, 'roles', target))).data();
         const caughtIds = [...(room.caughtIds || []), target];

@@ -1,18 +1,22 @@
 import './style.css';
 import QRCode from 'qrcode';
-import { doc, onSnapshot, getDoc } from 'firebase/firestore';
-import { normalizeRoom, resolveResult, threshold, eligiblePlayers, requiredPlayers, MAX_PLAYERS } from './game.js';
+import { doc, onSnapshot, getDoc, getDocs, collection, query, orderBy, limit } from 'firebase/firestore';
+import { normalizeRoom, resolveResult, threshold, eligiblePlayers, requiredPlayers, MAX_PLAYERS, MAX_SPIES } from './game.js';
 import { membershipState } from './room-view.js';
 import { LOCATION_SETS, locationSetId } from './locations.js';
-import { unlockSound, toggleSound, soundEnabled, playSpyWin, playTimeout } from './sound.js';
+import { unlockSound, toggleSound, soundEnabled, playSpyWin, playTimeout, playVote, playVotingSoon } from './sound.js';
 import { avatar } from './avatars.js';
 import { QUESTION_IDEAS } from './questions.js';
+import { clockCue } from './round-clock.js';
+import { bindDialogViewport } from './dialog.js';
+import { settleRound, saveProfile } from './scores.js';
 import { auth, db, identity, callGame } from './firebase.js';
 
 const $ = selector => document.querySelector(selector);
+bindDialogViewport($('#confirm'));
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const icon = (name, size = 20) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${({eye:'<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',arrow:'<path d="M4 12h16m-6-6 6 6-6 6"/>',plus:'<path d="M12 5v14M5 12h14"/>',users:'<circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2m1-15a3 3 0 0 1 0 6m2 3a5 5 0 0 1 3 4v2"/>',clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',lock:'<rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',check:'<path d="m5 12 4 4L19 6"/>',copy:'<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/>',pin:'<path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 0 1 14 0Z"/><circle cx="12" cy="10" r="2"/>',exit:'<path d="M9 4H4v16h5m5-12 4 4-4 4m-5-4h11"/>'})[name] || ''}</svg>`;
-const state = { code: new URLSearchParams(location.search).get('room')?.toUpperCase() || '', room: null, role: null, uid: null, tab: 'players', reveal: false, busy: false, loading: false, draft: null, stops: [], expireAttempt: 0, clockOffset: 0 };
+const state = { code: new URLSearchParams(location.search).get('room')?.toUpperCase() || '', room: null, role: null, uid: null, tab: 'players', reveal: false, busy: false, loading: false, draft: null, stops: [], clockOffset: 0 };
 let savedName = '';
 let stopRole = null;
 let connectionVersion = 0;
@@ -26,6 +30,43 @@ let lastVotes = {};
 let focusPlayers = false;
 let questionIndex = 0;
 let questionsOpen = false;
+let confirmedVotes = null, voteSoundRound = null;
+let clockRound = null, previousSeconds = null;
+const settlements = new Map();
+function saveScores() {
+  const r = state.room, code = state.code;
+  if (r?.status !== 'ended' || !r.roundKey) return Promise.resolve();
+  if (!settlements.has(r.roundKey)) settlements.set(r.roundKey, settleRound(db, state.uid, code).catch(error => { settlements.delete(r.roundKey); throw error; }));
+  return settlements.get(r.roundKey);
+}
+async function showLeaderboard(scope = state.room ? 'room' : 'overall') {
+  const dialog = $('#confirm'), code = state.code;
+  const roomAvailable = Boolean(state.room);
+  dialog.innerHTML = `<h2>Leaderboards</h2><div class="tabs score-tabs" role="tablist" aria-label="Leaderboard">${roomAvailable ? `<button role="tab" data-scope="room" aria-selected="${scope === 'room'}">This room</button>` : ''}<button role="tab" data-scope="overall" aria-selected="${scope === 'overall'}">Overall</button></div><div id="scores-content" aria-live="polite"><p>Loading standings…</p></div><button class="button quiet full" id="close-scores">Close</button>`;
+  if (!dialog.open) dialog.showModal();
+  $('#close-scores').onclick = () => dialog.close();
+  dialog.querySelectorAll('[data-scope]').forEach(button => { button.onclick = () => showLeaderboard(button.dataset.scope); });
+  const content = $('#scores-content');
+  try {
+    const user = await identity();
+    await saveScores();
+    const path = scope === 'room' ? ['rooms', code, 'scores'] : ['profiles'];
+    const [snapshot, own] = await Promise.all([getDocs(query(collection(db, ...path), orderBy('wins', 'desc'), limit(25))), getDoc(doc(db, ...path, user.uid))]);
+    if (!dialog.open || $('#scores-content') !== content) return;
+    const entries = snapshot.docs.map(doc => doc.data()).filter(player => player.gamesPlayed > 0);
+    if (scope === 'room') await Promise.all(entries.map(async player => {
+      const profile = await getDoc(doc(db, 'profiles', player.id));
+      if (profile.exists()) player.avatarSeed = profile.data().avatarSeed || player.id;
+    }));
+    if (!dialog.open || $('#scores-content') !== content) return;
+    let rank = 0;
+    const row = (p, position) => `<div class="score-row ${p.id === user.uid ? 'your-score' : ''}"><span class="score-rank">${position}</span><span class="avatar portrait">${avatar(p.avatarSeed || p.id)}</span><span class="score-name">${esc(scope === 'room' ? state.room?.players.find(player => player.id === p.id)?.name || p.name : p.name)}${p.id === user.uid ? ' <small>(you)</small>' : ''}<small>${p.gamesPlayed} ${p.gamesPlayed === 1 ? 'round' : 'rounds'} · ${Math.round(p.wins / p.gamesPlayed * 100)}% wins</small></span><strong>${p.wins}<small>${p.wins === 1 ? 'point' : 'points'}</small></strong></div>`;
+    content.innerHTML = `<p class="score-explainer">1 point per team win. Every completed round counts.</p>${entries.length ? `<div class="score-list">${entries.map((p, i) => { if (!i || p.wins !== entries[i - 1].wins) rank = i + 1; return row(p, rank); }).join('')}</div>` : '<p class="score-empty">No scores yet. Finish a round to get on the board.</p>'}${own.exists() && own.data().gamesPlayed && !entries.some(p => p.id === user.uid) ? `<p class="fineprint">Your total</p>${row(own.data(), '—')}` : ''}<p class="fineprint score-identity">${scope === 'overall' ? 'Top 25 players. ' : ''}Your profile is saved for this browser. Keep its site data to keep your identity.</p>`;
+  } catch (error) {
+    if ($('#scores-content') === content) content.innerHTML = `<p>${esc(errorMessage(error))}</p><button class="button secondary full" id="retry-scores">Try again</button>`;
+    $('#retry-scores')?.addEventListener('click', () => showLeaderboard(scope));
+  }
+}
 const inRound = r => ['active', 'accusing'].includes(r?.status);
 const spyLabel = count => `${count} ${count === 1 ? 'spy' : 'spies'}`;
 try { savedName = localStorage.getItem('spyfall-name') || ''; } catch {}
@@ -44,9 +85,9 @@ function header() {
     <a class="brand" href="/" aria-label="Spyfall home"><span class="brand-icon">${icon('eye', 23)}</span><span class="brand-name">spyfall<span class="brand-dot">✳</span></span></a>
     ${r ? `<span class="room-tag" aria-label="Room ${esc(state.code)}" title="Room code">${esc(state.code)}</span>` : ''}
     <nav class="nav-actions" aria-label="${r ? 'Room' : 'Game'} controls">
-      ${active ? '<div class="nav-timer"><span id="timer" aria-label="Time remaining">--:--</span></div>' : ''}
+      ${active ? '<div class="nav-timer"><span id="timer" aria-label="Suggested time remaining">--:--</span></div>' : ''}
       <button type="button" class="nav-icon sound-control" data-action="sound" aria-label="Sound" aria-pressed="${soundEnabled()}" title="${soundEnabled() ? 'Mute sound' : 'Enable sound'}">${soundIcon()}</button>
-      ${active && r.hostId === state.uid ? '<button type="button" class="nav-icon nav-stop" data-action="stop" aria-label="Stop round" title="Stop round"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="3"/></svg></button>' : ''}
+      ${active && r.hostId === state.uid ? '<button type="button" class="nav-icon nav-stop" data-action="end-round" aria-label="Round controls" title="Round controls"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="3"/></svg></button>' : ''}
       ${r ? `<button type="button" class="nav-icon nav-exit" data-action="exit-room" aria-label="Exit room" title="Exit room">${icon('exit', 20)}</button>` : ''}
     </nav>
   </header>`;
@@ -57,7 +98,7 @@ function soundIcon() {
 function shell(content, footer = 'A little suspicion brings people together.') {
   const screen = `${state.code}:${inRound(state.room) ? 'round' : state.room?.status || 'home'}:${state.room?.roundId || 0}:${state.room?.status === 'lobby' ? state.tab : ''}`;
   const entered = lastScreen !== screen;
-  $('#app').innerHTML = `<div class="shell">${header()}<main class="${entered ? 'screen-enter' : ''}">${content}</main><footer><span class="tiny-eye">${icon('eye', 16)}</span>${footer}</footer></div>`;
+  $('#app').innerHTML = `<div class="shell">${header()}<main class="${entered ? 'screen-enter' : ''}">${content}</main><footer><span class="footer-tagline">${icon('eye', 16)} ${footer}</span><span class="footer-credit">made with <span class="footer-heart" role="img" aria-label="love">♥</span> by vonUbisch</span></footer></div>`;
   document.querySelectorAll('[data-player-id]').forEach((row, index) => {
     if (entered || !lastPlayerIds.includes(row.dataset.playerId)) { row.classList.add('player-enter'); row.style.setProperty('--arrival', `${Math.min(index, 5) * 45}ms`); }
     if (!entered && row.dataset.vote !== lastVotes[row.dataset.playerId]) row.querySelector('.player-meta')?.classList.add('vote-updated');
@@ -70,14 +111,14 @@ function shell(content, footer = 'A little suspicion brings people together.') {
   if (focusPlayers && !state.busy) { focusPlayers = false; const tab = $('[data-action="players"]'); tab?.focus({ preventScroll: true }); tab?.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' }); }
 }
 function home() {
-  shell(`<section class="hero"><div class="eyebrow"><span class="dot"></span> SAME ROOM. SEPARATE PHONES.</div><h1>Good friends.<br><em>Great liars.</em></h1><p>One secret location. Spies in your midst.<br>Find out who’s hiding in plain sight.</p><div class="hero-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="agent agent-one">${icon('eye', 44)}</div><div class="agent agent-two">${icon('eye', 44)}</div><div class="agent agent-three">?</div><span class="art-note">trust no one.</span><span class="spark">✳</span></div><div class="facts"><span>${icon('users', 16)}2–15 players</span><span>${icon('clock', 16)}2–20 minutes</span><span>1–7 spies.</span></div></section><section class="panel entry"><label for="name">WHAT SHOULD WE CALL YOU?</label><input id="name" maxlength="20" autocomplete="nickname" placeholder="Your name" value="${esc(savedName)}"><button class="button primary" data-action="create">Create a room ${icon('plus')}</button><div class="divider"><span>or join your friends</span></div><form id="join-form"><label class="sr-only" for="code">Room code</label><div class="join-row"><input id="code" maxlength="6" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="ROOM CODE" value="${esc(state.code)}" required pattern="[A-Za-z2-9]{6}"><button class="button secondary" type="submit">Join ${icon('arrow')}</button></div></form><p class="fineprint">Got a QR code? Scan it with your phone’s camera.</p></section><section class="how"><div class="section-heading"><h2>A quick briefing</h2><span>01—03</span></div><div class="step"><span>01</span><div><h3>Get your secret</h3><p>Everyone learns the location. Except the spies.</p></div></div><div class="step"><span>02</span><div><h3>Ask. Answer. Act natural.</h3><p>Question each other out loud. Be specific enough to fit in, vague enough to keep the secret.</p></div></div><div class="step"><span>03</span><div><h3>Make your move</h3><p>Vote out the spy, or guess the location if you are one. Watch the clock.</p></div></div></section>`);
+  shell(`<section class="hero"><div class="eyebrow"><span class="dot"></span> SAME ROOM. SEPARATE PHONES.</div><h1>Good friends.<br><em>Great liars.</em></h1><p>One secret location. Spies in your midst.<br>Find out who’s hiding in plain sight.</p><div class="hero-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="agent agent-one">${icon('eye', 44)}</div><div class="agent agent-two">${icon('eye', 44)}</div><div class="agent agent-three">?</div><span class="art-note">trust no one.</span><span class="spark">✳</span></div><div class="facts"><span>${icon('users', 16)}2–15 players</span><span>${icon('clock', 16)}2–20 minutes</span><span>1–3 spies.</span></div></section><section class="panel entry"><label for="name">WHAT SHOULD WE CALL YOU?</label><input id="name" maxlength="20" autocomplete="nickname" placeholder="Your name" value="${esc(savedName)}"><button class="button primary" data-action="create">Create a room ${icon('plus')}</button><div class="divider"><span>or join your friends</span></div><form id="join-form"><label class="sr-only" for="code">Room code</label><div class="join-row"><input id="code" maxlength="6" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="ROOM CODE" value="${esc(state.code)}" required pattern="[A-Za-z2-9]{6}"><button class="button secondary" type="submit">Join ${icon('arrow')}</button></div></form><p class="fineprint">Got a QR code? Scan it with your phone’s camera.</p></section><button class="text-button leaderboard-link" data-action="scores">View overall leaderboard</button><section class="how"><div class="section-heading"><h2>A quick briefing</h2><span>01—03</span></div><div class="step"><span>01</span><div><h3>Get your secret</h3><p>Everyone learns the location. Except the spies.</p></div></div><div class="step"><span>02</span><div><h3>Ask. Answer. Act natural.</h3><p>Question each other out loud. Be specific enough to fit in, vague enough to keep the secret.</p></div></div><div class="step"><span>03</span><div><h3>Make your move</h3><p>Vote out the spy, or guess the location if you are one. Watch the clock.</p></div></div></section>`);
 }
 function playerList(voting = false) {
   const r = state.room;
   return r.players.map((p, index) => {
     const count = Object.values(r.votes || {}).filter(id => id === p.id).length;
     const caught = r.caughtIds.includes(p.id), canVote = r.status === 'active' && !r.caughtIds.includes(state.uid);
-    return `<div class="player ${caught ? 'caught-player' : ''}" data-player-id="${esc(p.id)}" data-vote="${count}"><span class="avatar portrait">${avatar(p.id)}</span><div class="player-name">${esc(p.name)} ${p.id === state.uid ? '<small>(you)</small>' : ''}<span class="player-meta">${caught ? 'SPY CAUGHT' : voting ? `${count} ${count === 1 ? 'vote' : 'votes'}` : p.id === r.hostId ? 'HOST' : 'READY TO PLAY'}</span></div>${voting ? (caught ? '<span class="caught-badge">Caught</span>' : p.id !== state.uid ? `<button class="vote-button ${r.votes[state.uid] === p.id ? 'selected' : ''}" data-action="vote" data-target="${esc(p.id)}" aria-label="Vote for ${esc(p.name)}" ${!canVote ? 'disabled' : ''}>${r.votes[state.uid] === p.id ? icon('check') : 'Vote'}</button>` : '') : p.id === state.uid ? '<button class="text-button" data-action="rename">Edit name</button>' : state.uid === r.hostId ? `<button class="icon-button remove" data-action="remove" data-target="${esc(p.id)}" aria-label="Remove ${esc(p.name)}">×</button>` : `<span class="ready-dot"></span>`}</div>`;
+    return `<div class="player ${caught ? 'caught-player' : ''}" data-player-id="${esc(p.id)}" data-vote="${count}"><span class="avatar portrait">${avatar(p.avatarSeed || p.id)}</span><div class="player-name">${esc(p.name)} ${p.id === state.uid ? '<small>(you)</small>' : ''}<span class="player-meta">${caught ? 'SPY CAUGHT' : voting ? `${count} ${count === 1 ? 'vote' : 'votes'}` : p.id === r.hostId ? 'HOST' : 'READY TO PLAY'}</span></div>${voting ? (caught ? '<span class="caught-badge">Caught</span>' : p.id !== state.uid ? `<button class="vote-button ${r.votes[state.uid] === p.id ? 'selected' : ''}" data-action="vote" data-target="${esc(p.id)}" aria-label="Vote for ${esc(p.name)}" ${!canVote ? 'disabled' : ''}>${r.votes[state.uid] === p.id ? icon('check') : 'Vote'}</button>` : '') : p.id === state.uid ? '<button class="text-button" data-action="rename">Edit profile</button>' : state.uid === r.hostId ? `<button class="icon-button remove" data-action="remove" data-target="${esc(p.id)}" aria-label="Remove ${esc(p.name)}">×</button>` : `<span class="ready-dot"></span>`}</div>`;
   }).join('');
 }
 function readRulesForm() {
@@ -103,7 +144,7 @@ function rules() {
   return `<section class="panel settings"><div class="section-heading"><h2>Set the scene</h2><span>${host ? 'HOST CONTROLS' : 'HOUSE RULES'}</span></div>${host ? `<form id="rules-form">
     <label for="minutes">ROUND LENGTH <output id="minutes-label">${d.minutes} min</output></label><input type="range" id="minutes" min="2" max="20" value="${d.minutes}"><p class="fineprint">Choose between 2 and 20 minutes.</p>
     <label for="voting">VOTING RULE</label><select id="voting"><option value="majority" ${d.voting === 'majority' ? 'selected' : ''}>Majority wins</option><option value="unanimous" ${d.voting === 'unanimous' ? 'selected' : ''}>Everyone except the accused</option></select>
-    <label for="spies">NUMBER OF SPIES</label><select id="spies">${Array.from({ length: 7 }, (_, i) => `<option value="${i + 1}" ${d.spies === i + 1 ? 'selected' : ''}>${spyLabel(i + 1)} · ${requiredPlayers(i + 1)}+ players</option>`).join('')}</select><p class="fineprint">Catch every spy to win. Caught spies stop voting and guessing. A wrong accusation or a correct spy guess wins for the spies; a wrong guess wins for the group.</p>
+    <label for="spies">NUMBER OF SPIES</label><select id="spies">${Array.from({ length: MAX_SPIES }, (_, i) => `<option value="${i + 1}" ${d.spies === i + 1 ? 'selected' : ''}>${spyLabel(i + 1)} · ${requiredPlayers(i + 1)}+ players</option>`).join('')}</select><p class="fineprint">Multi-spy games need 4 players per spy. Catch every spy to win. Caught spies stop voting and guessing. A wrong accusation or a correct spy guess wins for the spies; a wrong guess wins for the group.</p>
     <label for="location-set">LOCATION SET</label><select id="location-set">${LOCATION_SETS.map(set => `<option value="${set.id}" ${locationSetId(d.locations) === set.id ? 'selected' : ''}>${set.name}</option>`).join('')}${locationSetId(d.locations) === 'custom' ? '<option value="custom" selected>Custom selection</option>' : ''}</select><p class="fineprint">Choosing a set replaces the list below. Add, edit, or remove locations to make it your own.</p>
     <div class="location-editor-heading">POSSIBLE LOCATIONS <span>${d.locations.length}/40 · minimum 3</span></div>
     <div class="location-editor">${d.locations.map((location, i) => `<div class="location-row"><input class="location-input" aria-label="Location ${i + 1}" maxlength="40" value="${esc(location)}" required><button type="button" class="remove-location" data-action="remove-location" data-index="${i}" aria-label="Remove ${esc(location)}" ${d.locations.length <= 3 ? 'disabled' : ''}>×</button></div>`).join('')}</div>
@@ -118,7 +159,7 @@ function lobby() {
     <section class="invite panel"><div><label>ROOM CODE</label><strong class="room-code">${esc(state.code)}</strong><button class="text-button" data-action="share">${icon('copy', 16)} Copy invite link</button></div><canvas id="qr" aria-label="Scan to join this room" role="img"></canvas></section>
     <div class="tabs" role="tablist" aria-label="Lobby sections"><button role="tab" aria-selected="${state.tab === 'players'}" data-action="players">Players <span>${r.players.length}/${MAX_PLAYERS}</span></button><button role="tab" aria-selected="${state.tab === 'rules'}" data-action="rules">Game rules ${icon('clock', 16)}</button></div>
     ${state.tab === 'players' ? `<section class="panel roster">${playerList()}${needed > 0 ? `<p class="waiting">Waiting for ${needed} more ${needed === 1 ? 'player' : 'players'} for ${spyLabel(r.settings.spies)}…</p>` : ''}</section><div class="round-summary">${icon('clock', 16)} ${r.settings.minutes} min <span>·</span> ${r.settings.locations.length} locations <span>·</span> ${spyLabel(r.settings.spies)}</div>` : rules()}
-    <div class="bottom-action">${host ? `<button class="button primary full" data-action="start" ${needed > 0 ? 'disabled' : ''}>Start the game ${icon('arrow')}</button>` : `<div class="waiting-host"><span class="pulse"></span> Waiting for the host to start</div>`}</div>`);
+    <div class="bottom-action">${host ? `<button class="button primary full" data-action="start" ${needed > 0 ? 'disabled' : ''}>Start the game ${icon('arrow')}</button>` : `<div class="waiting-host"><span class="pulse"></span> Waiting for the host to start</div>`}</div><button class="text-button leaderboard-link" data-action="scores">Leaderboards</button>`);
   QRCode.toCanvas($('#qr'), inviteUrl(), { width: 116, margin: 1, color: { dark: '#252a25', light: '#ffffff' } }).catch(() => notice('QR code unavailable. You can still share the invite link.'));
 }
 function active() {
@@ -133,7 +174,8 @@ function active() {
     ${r.status === 'accusing' ? '<p class="round-status" role="status"><span class="pulse"></span> Checking the accusation…</p>' : ''}
     ${r.caughtIds.includes(state.uid) ? '<p class="round-status">You’ve been caught. Watch the remaining players finish the round.</p>' : ''}
     <section class="role-card ${state.reveal && spy ? 'spy-card' : ''}" id="role-card"><div id="role-content">${roleContent(role)}</div><button class="button secondary hold-reveal" id="reveal-role" type="button" aria-pressed="${state.reveal}" aria-describedby="reveal-help" ${!role ? 'disabled' : ''}>Hold to reveal ${icon('eye')}</button><p id="reveal-help" class="reveal-help">Release to hide. Keyboard: hold Space or Enter.</p></section>
-    <details class="question-ideas panel" ${questionsOpen ? 'open' : ''}><summary>Question ideas <span>A little inspiration</span></summary><p class="fineprint">Keep answers broad. These prompts fit lots of places.</p><ul id="question-list">${[0,1,2].map(i => `<li>${QUESTION_IDEAS[(questionIndex + i) % QUESTION_IDEAS.length]}</li>`).join('')}</ul><button class="text-button" data-action="more-questions">More ideas ${icon('arrow', 16)}</button></details>
+    <p id="timer-guidance" class="round-status timer-guidance" role="status" hidden></p>
+    <details class="question-ideas panel" ${questionsOpen ? 'open' : ''}><summary><span class="question-heading">Question ideas<small>A little inspiration</small></span><svg class="question-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary><div class="question-body"><p class="fineprint">Keep answers broad. These prompts fit lots of places.</p><ul id="question-list">${[0,1,2].map(i => `<li>${QUESTION_IDEAS[(questionIndex + i) % QUESTION_IDEAS.length]}</li>`).join('')}</ul><button class="text-button" data-action="more-questions">More ideas ${icon('arrow', 16)}</button></div></details>
     ${locations}
     <div class="section-heading section-space"><h2>Vote for a player</h2><span>${Object.keys(r.votes).length}/${eligiblePlayers(r).length} VOTED</span></div>
     <p class="section-description">Everyone still in play can vote, including spies. ${threshold(r)} ${threshold(r) === 1 ? 'vote confirms' : 'votes confirm'} an accusation. ${r.settings.spies > 1 ? 'Catch every spy to win. Accusing an innocent player lets the spies win.' : 'An accusation ends the round.'}</p>
@@ -146,8 +188,8 @@ function ended() {
   const spies = r.players.filter(p => result.spyIds.includes(p.id)), multiple = spies.length > 1;
   const spy = r.players.find(p => p.id === result.guesserId) || spies[0];
   const accused = r.players.find(p => p.id === result.accusedId);
-  const reason = result.reason === 'timeout' ? 'Time ran out before all spies were caught.' : result.reason === 'guess' ? `${spy?.name} guessed “${result.guess}”. ${result.winner === 'spy' ? 'Right on the mark.' : 'The secret stayed safe.'}` : `${accused?.name} was accused. ${result.winner === 'players' ? 'Every spy has been caught.' : 'An innocent player. The spies win.'}`;
-  shell(`<div class="eyebrow page-label"><span class="dot"></span> ROUND ${r.roundId} COMPLETE</div><div class="result-art">${icon('eye', 80)}<span>CASE CLOSED</span></div><h1 class="page-title result-title">${result.winner === 'spy' ? `${multiple ? 'The spies' : 'The spy'}<br><em>got away.</em>` : 'Cover<br><em>blown.</em>'}</h1><p class="subtitle">${result.winner === 'spy' ? `${multiple ? 'The spies win' : 'The spy wins'} this round.` : 'The group wins this round.'}</p><section class="panel result-panel"><label>${multiple ? 'THE SPIES WERE' : 'THE SPY WAS'}</label><h2>${spies.map(p => esc(p.name)).join(', ')}</h2><div class="result-location">${icon('pin')}<div><label>THE SECRET LOCATION</label><strong>${esc(result.location)}</strong></div></div><p>${esc(reason)}</p></section><div class="bottom-action">${state.uid === r.hostId ? `<button class="button primary full" data-action="reset">Back to lobby ${icon('arrow')}</button>` : '<div class="waiting-host"><span class="pulse"></span> Waiting for the host’s next round</div>'}<p class="fineprint centered">Same friends. A new secret.</p></div>`);
+  const reason = result.reason === 'host' ? 'The host ended the round with spies still in play.' : result.reason === 'timeout' ? 'Time ran out before all spies were caught.' : result.reason === 'guess' ? `${spy?.name} guessed “${result.guess}”. ${result.winner === 'spy' ? 'Right on the mark.' : 'The secret stayed safe.'}` : `${accused?.name} was accused. ${result.winner === 'players' ? 'Every spy has been caught.' : 'An innocent player. The spies win.'}`;
+  shell(`<div class="eyebrow page-label"><span class="dot"></span> ROUND ${r.roundId} COMPLETE</div><div class="result-art">${icon('eye', 80)}<span>CASE CLOSED</span></div><h1 class="page-title result-title">${result.winner === 'spy' ? `${multiple ? 'The spies' : 'The spy'}<br><em>got away.</em>` : 'Cover<br><em>blown.</em>'}</h1><p class="subtitle">${result.winner === 'spy' ? `${multiple ? 'The spies win' : 'The spy wins'} this round.` : 'The group wins this round.'}</p><section class="panel result-panel"><label>${multiple ? 'THE SPIES WERE' : 'THE SPY WAS'}</label><h2>${spies.map(p => `<span class="named-player"><span class="avatar portrait">${avatar(p.avatarSeed || p.id)}</span>${esc(p.name)}</span>`).join('')}</h2><div class="result-location">${icon('pin')}<div><label>THE SECRET LOCATION</label><strong>${esc(result.location)}</strong></div></div><p class="result-reason">${(result.reason === 'vote' ? accused : result.reason === 'guess' ? spy : null) ? `<span class="avatar portrait">${avatar((result.reason === 'vote' ? accused : spy).avatarSeed || (result.reason === 'vote' ? accused : spy).id)}</span>` : ''}<span>${esc(reason)}</span></p></section><div class="bottom-action">${state.uid === r.hostId ? `<button class="button primary full" data-action="reset">Back to lobby ${icon('arrow')}</button>` : '<div class="waiting-host"><span class="pulse"></span> Waiting for the host’s next round</div>'}<button class="text-button leaderboard-link" data-action="scores">Leaderboards</button><p class="fineprint centered">Same friends. A new secret.</p></div>`);
 }
 function render() {
   if (state.reveal) concealRole();
@@ -158,7 +200,7 @@ function render() {
   else ended();
 }
 function inviteUrl() { const url = new URL(location.origin); url.searchParams.set('room', state.code); return url.href; }
-function disconnect() { connectionVersion++; state.stops.forEach(stop => stop()); state.stops = []; stopRole?.(); stopRole = null; state.room = null; state.role = null; state.loading = false; state.draft = null; state.reveal = false; }
+function disconnect() { clockRound = null; previousSeconds = null; confirmedVotes = null; voteSoundRound = null; connectionVersion++; state.stops.forEach(stop => stop()); state.stops = []; stopRole?.(); stopRole = null; state.room = null; state.role = null; state.loading = false; state.draft = null; state.reveal = false; }
 async function loadResult() {
   const roundId = state.room?.roundId, code = state.code;
   try {
@@ -168,9 +210,10 @@ async function loadResult() {
       if (pendingWinSound === `${code}:${roundId}`) {
         pendingWinSound = null;
         if (state.room.result.reason === 'guess' && state.room.result.winner === 'spy') playSpyWin();
-        else if (state.room.result.reason === 'timeout') playTimeout();
+        else playTimeout();
       }
       render();
+      void saveScores().catch(() => notice('Scores haven’t synced yet. Open Leaderboards to retry.'));
     }
   } catch (error) { notice(errorMessage(error)); }
 }
@@ -187,10 +230,15 @@ async function connect(code) {
       if (membership === 'pending') return;
       if (membership === 'removed') { disconnect(); render(); notice('You are no longer in this room.'); return; }
       const next = normalizeRoom(snap.data());
+      if (!snap.metadata.hasPendingWrites && !snap.metadata.fromCache) {
+        const key = `${code}:${next.roundId}`;
+        if (voteSoundRound === key && confirmedVotes && Object.entries(next.votes).some(([id, target]) => target !== confirmedVotes[id])) playVote();
+        confirmedVotes = { ...next.votes }; voteSoundRound = key;
+      }
       if (next.status === 'lobby' && inRound(state.room)) notice('Round stopped. You’re back in the lobby.');
       if (next.status === 'ended' && inRound(state.room) && next.roundId === state.room.roundId) pendingWinSound = `${code}:${next.roundId}`;
       if (next.caughtIds.length > (state.room?.caughtIds.length || 0)) notice('A spy was caught. Votes reset—keep looking for the others.');
-      if (next.roundId !== state.room?.roundId || next.status !== state.room?.status) { state.reveal = false; state.expireAttempt = 0; $('#confirm').close(); }
+      if (next.roundId !== state.room?.roundId || next.status !== state.room?.status) { state.reveal = false; $('#confirm').close(); }
       state.room = next; state.loading = false; render();
       if (inRound(next) && !stopRole) stopRole = onSnapshot(doc(db, 'rooms', code, 'roles', state.uid), roleSnap => { state.role = roleSnap.exists() ? roleSnap.data() : null; if (inRound(state.room)) render(); }, async error => {
         state.role = null; stopRole = null;
@@ -215,9 +263,9 @@ async function resolveAccusation() {
   try { await action('resolve-vote'); } catch (error) { notice(errorMessage(error)); }
   finally { resolvingVote = false; }
 }
-function confirmAction(title, text, label, task) {
+function confirmAction(title, text, label, task, player = null) {
   const dialog = $('#confirm');
-  dialog.innerHTML = `<form method="dialog"><span class="eyebrow">MAKE YOUR MOVE</span><h2>${esc(title)}</h2><p>${esc(text)}</p><button class="button primary full" id="confirm-action" type="button">${esc(label)}</button><button class="button quiet full" value="cancel">Not yet</button></form>`;
+  dialog.innerHTML = `<form method="dialog"><span class="eyebrow">MAKE YOUR MOVE</span><h2>${esc(title)}</h2>${player ? `<div class="named-player"><span class="avatar portrait">${avatar(player.avatarSeed || player.id)}</span><strong>${esc(player.name)}</strong></div>` : ''}<p>${esc(text)}</p><button class="button primary full" id="confirm-action" type="button">${esc(label)}</button><button class="button quiet full" value="cancel">Not yet</button></form>`;
   dialog.showModal();
   $('#confirm-action').onclick = () => { dialog.close(); run(task); };
 }
@@ -291,16 +339,25 @@ $('#app').addEventListener('submit', event => {
 $('#app').addEventListener('click', event => {
   const button = event.target.closest('[data-action]'); if (!button) return;
   const type = button.dataset.action;
+  if (type === 'scores') return showLeaderboard();
   if (type === 'more-questions') { questionIndex = (questionIndex + 3) % QUESTION_IDEAS.length; const list = $('#question-list'); list.innerHTML = [0,1,2].map(i => `<li>${QUESTION_IDEAS[(questionIndex + i) % QUESTION_IDEAS.length]}</li>`).join(''); return; }
   if (type === 'rename') {
-    const dialog = $('#confirm');
-    dialog.innerHTML = `<form id="rename-form"><h2>Your agent name</h2><label for="player-name">NAME</label><input id="player-name" maxlength="20" required autocomplete="nickname" value="${esc(state.room.players.find(p => p.id === state.uid).name)}"><button class="button primary full name-save" type="submit">Save name ${icon('check')}</button><button class="button quiet full" type="button" id="cancel-name">Cancel</button></form>`;
+    const dialog = $('#confirm'), player = state.room.players.find(p => p.id === state.uid);
+    let avatarSeed = player.avatarSeed || player.id;
+    dialog.innerHTML = `<form id="rename-form"><h2>Your agent profile</h2><div class="avatar-editor"><span class="avatar portrait" id="profile-avatar">${avatar(avatarSeed)}</span><button type="button" class="button secondary" id="regenerate-avatar">New avatar</button></div><label for="player-name">NAME</label><input id="player-name" maxlength="20" required autocomplete="nickname" value="${esc(player.name)}"><button class="button primary full name-save" type="submit">Save profile ${icon('check')}</button><button class="button quiet full" type="button" id="cancel-name">Cancel</button></form>`;
     dialog.showModal();
+    $('#regenerate-avatar').onclick = () => { avatarSeed = crypto.randomUUID(); $('#profile-avatar').innerHTML = avatar(avatarSeed); };
     $('#cancel-name').onclick = () => dialog.close();
-    $('#rename-form').onsubmit = event => { event.preventDefault(); const name = $('#player-name').value.trim(); dialog.close(); run(async () => { await action('rename', { name }); savedName = name; try { localStorage.setItem('spyfall-name', name); } catch {} }); };
+    $('#rename-form').onsubmit = event => { event.preventDefault(); const name = $('#player-name').value.trim(); dialog.close(); run(async () => { await action('rename', { name, avatarSeed }); savedName = name; try { localStorage.setItem('spyfall-name', name); } catch {} }); };
     return;
   }
-  if (type === 'stop') return confirmAction('Stop this round?', 'Everyone will return to the lobby. No winner will be recorded.', 'Stop round', () => action('stop'));
+  if (type === 'end-round') {
+    confirmAction('End this round?', 'Any spies still in play win. The timer is only a guide—you decide when time is up.', 'End round', () => action('end'));
+    const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'button quiet full'; cancel.textContent = 'Cancel round without scores';
+    cancel.onclick = () => { $('#confirm').close(); confirmAction('Cancel this round?', 'Everyone returns to the lobby. No scores are recorded.', 'Cancel round', () => action('stop')); };
+    $('#confirm form').append(cancel);
+    return;
+  }
   if (type === 'exit-room') return confirmAction('Exit the room?', state.room.status === 'lobby' ? 'You can rejoin using the room code. If you are hosting, the next player becomes host.' : 'This will return everyone to the lobby and reset the round. If you are hosting, the next player becomes host.', 'Exit room', async () => { await action('leave'); disconnect(); state.code = ''; history.replaceState(null, '', '/'); render(); });
   if (type === 'sound') { toggleSound(); button.innerHTML = soundIcon(); button.setAttribute('aria-pressed', String(soundEnabled())); button.title = soundEnabled() ? 'Mute sound' : 'Enable sound'; return; }
   if (type === 'add-location' || type === 'remove-location') return editLocation(type, Number(button.dataset.index));
@@ -309,12 +366,12 @@ $('#app').addEventListener('click', event => {
   if (type === 'players' || type === 'rules') { state.tab = type; render(); return; }
   if (type === 'home') { disconnect(); history.replaceState(null, '', '/'); state.code = ''; render(); return; }
   if (type === 'share') return run(async () => { try { await navigator.clipboard.writeText(inviteUrl()); notice('Invite link copied. Send it to your friends.'); } catch { notice(`Invite link: ${inviteUrl()}`); } });
-  if (type === 'vote') { const player = state.room.players.find(p => p.id === button.dataset.target); return confirmAction(`Accuse ${player.name}?`, 'If enough players agree, their role is checked. Catch every spy to win. A wrong accusation lets the spies win.', 'Cast my vote', () => action('vote', { target: player.id })); }
+  if (type === 'vote') { const player = state.room.players.find(p => p.id === button.dataset.target); return confirmAction('Accuse this player?', 'If enough players agree, their role is checked. Catch every spy to win. A wrong accusation lets the spies win.', 'Cast my vote', () => action('vote', { target: player.id }), player); }
   if (type === 'guess') {
     if (!state.role?.isSpy) { notice('Only the spy can submit a location guess. You can vote for a player below.'); return; }
     return confirmAction(`Guess ${button.dataset.location}?`, 'This is your only guess. Get it wrong and the other players win.', 'Lock in my guess', () => action('guess', { location: button.dataset.location }));
   }
-  if (type === 'remove') return confirmAction('Remove this player?', 'They can rejoin using the room code while the lobby is open.', 'Remove player', () => action('remove', { target: button.dataset.target }));
+  if (type === 'remove') return confirmAction('Remove this player?', 'They can rejoin using the room code while the lobby is open.', 'Remove player', () => action('remove', { target: button.dataset.target }), state.room.players.find(p => p.id === button.dataset.target));
   if (type === 'leave') return run(async () => { await action('leave'); disconnect(); state.code = ''; history.replaceState(null, '', '/'); render(); });
   if (type === 'start' && state.draft) { notice('Save your game rules before starting.'); state.tab = 'rules'; render(); return; }
   if (['start', 'reset'].includes(type)) run(() => action(type));
@@ -325,9 +382,16 @@ function updateClock() {
   const timer = $('#timer');
   if (timer) { timer.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`; timer.classList.toggle('urgent', seconds < 30); }
   if (r.status === 'accusing') resolveAccusation();
-  if (seconds === 0 && navigator.onLine && !state.busy && Date.now() - state.expireAttempt > 5000) {
-    state.expireAttempt = Date.now();
-    action('expire').catch(error => notice(errorMessage(error)));
+  const key = `${state.code}:${r.roundId}`;
+  if (clockRound !== key) { clockRound = key; previousSeconds = null; }
+  const cue = clockCue(previousSeconds, seconds);
+  previousSeconds = seconds;
+  if (cue === 'vote') playVotingSoon();
+  if (cue === 'time') playTimeout();
+  const guidance = $('#timer-guidance');
+  if (guidance) {
+    guidance.hidden = seconds > 60;
+    guidance.textContent = seconds === 0 ? 'Time’s up. Keep playing—the host decides when to end the round.' : 'One minute left. Time to vote for your suspects.';
   }
 }
 document.addEventListener('visibilitychange', () => { if (document.hidden) concealRole(); else updateClock(); });
@@ -350,6 +414,7 @@ identity().then(async user => {
       await callGame({ action: 'join', code: state.code, name });
       savedName = name; try { localStorage.setItem('spyfall-name', name); } catch {}
     }
+    await saveProfile(db, user.uid, savedName || snap.data().players[user.uid]?.name || `Agent ${user.uid.slice(0, 6)}`);
     await connect(state.code);
   }
 }).catch(error => { state.loading = false; render(); notice(errorMessage(error)); });

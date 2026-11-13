@@ -12,6 +12,58 @@ service cloud.firestore {
     function activeIds(r) { return r.memberIds.removeAll(caught(r)); }
     function spies(s) { return s.get('spyIds', [s.get('spyId', '')]); }
     function spyCount(r) { return r.settings.get('spies', 1); }
+    function archived(r) { return r.status != 'ended' || !('roundKey' in r) || exists(/databases/$(database)/documents/results/$(r.roundKey)); }
+    function validName(n) { return n is string && n.size() >= 1 && n.size() <= 20; }
+    function validAvatar(s, id) { return s.get('avatarSeed',id) is string && s.get('avatarSeed',id).size() >= 1 && s.get('avatarSeed',id).size() <= 64; }
+    function validStats(s, id) {
+      return s.keys().hasOnly(['id','name','avatarSeed','wins','gamesPlayed','lastRoundKey','updatedAt']) && s.id == id && validName(s.name) && validAvatar(s,id)
+        && s.wins is int && s.gamesPlayed is int && s.wins >= 0 && s.gamesPlayed >= s.wins
+        && s.lastRoundKey is string && s.updatedAt == request.time;
+    }
+    function awardAllowed(key, id) {
+      let result = get(/databases/$(database)/documents/results/$(key)).data;
+      let award = getAfter(/databases/$(database)/documents/results/$(key)/awards/$(id)).data;
+      return signedIn() && uid() in result.memberIds && id in result.memberIds
+        && !exists(/databases/$(database)/documents/results/$(key)/awards/$(id))
+        && award == {'won':id in result.winnerIds,'createdAt':request.time};
+    }
+    function statsIncrement(old, next, id) {
+      let result = get(/databases/$(database)/documents/results/$(next.lastRoundKey)).data;
+      return validStats(next,id) && awardAllowed(next.lastRoundKey,id)
+        && next.gamesPlayed == old.get('gamesPlayed',0) + 1
+        && next.wins == old.get('wins',0) + (id in result.winnerIds ? 1 : 0);
+    }
+    match /profiles/{id} {
+      allow get: if signedIn();
+      allow list: if signedIn() && request.query.limit <= 50;
+      allow create: if signedIn() && validStats(request.resource.data,id) && (
+        uid() == id && request.resource.data.wins == 0 && request.resource.data.gamesPlayed == 0 && request.resource.data.lastRoundKey == ''
+        || statsIncrement({},request.resource.data,id) && request.resource.data.name == get(/databases/$(database)/documents/results/$(request.resource.data.lastRoundKey)).data.players[id].name
+          && request.resource.data.get('avatarSeed',id) == get(/databases/$(database)/documents/results/$(request.resource.data.lastRoundKey)).data.players[id].get('avatarSeed',id));
+      allow update: if signedIn() && validStats(request.resource.data,id) && (
+        uid() == id && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name','avatarSeed','updatedAt'])
+        || request.resource.data.name == resource.data.name && request.resource.data.get('avatarSeed',id) == resource.data.get('avatarSeed',id) && statsIncrement(resource.data,request.resource.data,id));
+    }
+    match /results/{key} {
+      allow get: if signedIn();
+      function validResult() {
+        let next = request.resource.data;
+        let r = room(next.code);
+        let s = get(/databases/$(database)/documents/rooms/$(next.code)/secrets/current).data;
+        let spyWins = r.result.reason in ['timeout','host'] || (r.result.reason == 'guess' ? r.result.guess == s.location : !(r.result.accusedId in spies(s)));
+        return member(r) && r.status == 'ended' && r.roundKey == key
+          && next.keys().hasOnly(['code','roundId','memberIds','players','winnerIds','completedAt'])
+          && next.roundId == r.roundId && next.memberIds == r.memberIds && next.players == r.players
+          && next.winnerIds == (spyWins ? spies(s) : r.memberIds.removeAll(spies(s))) && next.completedAt == request.time;
+      }
+      allow create: if signedIn() && validResult();
+      match /awards/{id} {
+        allow get: if signedIn();
+        allow create: if awardAllowed(key,id)
+          && getAfter(/databases/$(database)/documents/profiles/$(id)).data.lastRoundKey == key
+          && getAfter(/databases/$(database)/documents/rooms/$(get(/databases/$(database)/documents/results/$(key)).data.code)/scores/$(id)).data.lastRoundKey == key;
+      }
+    }
     function clearingRound(code) {
       let old = room(code);
       return old.status in ['active','accusing','ended'] && (host(old) || (member(old) && !(uid() in after(code).memberIds)))
@@ -21,11 +73,11 @@ service cloud.firestore {
       return s.keys().hasOnly(['minutes', 'voting', 'spies', 'locations'])
         && s.minutes is int && s.minutes >= 2 && s.minutes <= 20
         && s.voting in ['majority', 'unanimous']
-        && s.get('spies', 1) is int && s.get('spies', 1) >= 1 && s.get('spies', 1) <= 7
+        && s.get('spies', 1) is int && s.get('spies', 1) >= 1 && s.get('spies', 1) <= 3
         && s.locations is list && s.locations.size() >= 3 && s.locations.size() <= 40
         && s.locations.toSet().size() == s.locations.size();
     }
-    function expired(r) { return request.time >= r.startedAt + duration.value(r.settings.minutes, 'm'); }
+
     function voteAt(r, i, target) { return r.memberIds.size() > i && r.votes.get(r.memberIds[i], '') == target ? 1 : 0; }
     function count(r, target) {
       return voteAt(r,0,target) + voteAt(r,1,target) + voteAt(r,2,target) + voteAt(r,3,target)
@@ -50,7 +102,7 @@ service cloud.firestore {
         && request.resource.data.status == 'lobby' && request.resource.data.roundId == 0
         && request.resource.data.votes == {} && request.resource.data.createdAt == request.time
         && validSettings(request.resource.data.settings);
-      function validPlayer(p) { return p.keys().hasOnly(['id','name']) && p.id == uid() && p.name is string && p.name.size() >= 1 && p.name.size() <= 20; }
+      function validPlayer(p) { return p.keys().hasOnly(['id','name','avatarSeed']) && p.id == uid() && validName(p.name) && validAvatar(p,uid()); }
       function changed(keys) { return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys); }
       function cleared() {
         let next = request.resource.data;
@@ -70,7 +122,7 @@ service cloud.firestore {
       function remove() {
         let old = resource.data; let next = request.resource.data;
         let removed = old.memberIds.removeAll(next.memberIds);
-        return (old.status == 'lobby' ? changed(['memberIds','players','hostId'])
+        return archived(old) && (old.status == 'lobby' ? changed(['memberIds','players','hostId'])
           : removed.size() == 1 && removed[0] == uid() && changed(['memberIds','players','hostId','status','votes','caughtIds','result','startedAt']) && cleared())
           && removed.size() == 1 && next.memberIds == old.memberIds.removeAll(removed) && next.memberIds.size() >= 1
           && (host(old) || removed[0] == uid())
@@ -82,14 +134,16 @@ service cloud.firestore {
         let old = resource.data; let next = request.resource.data;
         let secret = getAfter(/databases/$(database)/documents/rooms/$(code)/secrets/current).data;
         return host(old) && old.status == 'lobby' && old.memberIds.size() >= 2
-          && (spyCount(old) == 1 || old.memberIds.size() >= spyCount(old) * 2 + 1)
-          && changed(['status','roundId','startedAt','votes','caughtIds','result'])
+          && (spyCount(old) == 1 || old.memberIds.size() >= spyCount(old) * 4)
+          && changed(['status','roundId','roundKey','startedAt','votes','caughtIds','result'])
+          && next.roundKey is string && next.roundKey.matches('^[a-f0-9-]{36}$')
+          && !exists(/databases/$(database)/documents/results/$(next.roundKey))
           && next.status == 'active' && next.roundId == old.roundId + 1 && next.startedAt == request.time
           && next.votes == {} && caught(next) == [] && next.result == null && secret.roundId == next.roundId;
       }
       function vote() {
         let old = resource.data; let next = request.resource.data; let target = next.votes[uid()];
-        return old.status == 'active' && !expired(old) && changed(['votes','status','result'])
+        return old.status == 'active' && changed(['votes','status','result'])
           && uid() in activeIds(old) && target in activeIds(old) && target != uid()
           && next.votes.diff(old.votes).affectedKeys().hasOnly([uid()])
           && (passed(next,target)
@@ -100,7 +154,7 @@ service cloud.firestore {
         let old = resource.data; let next = request.resource.data;
         let target = old.result.accusedId;
         let isSpy = get(/databases/$(database)/documents/rooms/$(code)/roles/$(target)).data.isSpy;
-        return old.status == 'accusing' && !expired(old)
+        return old.status == 'accusing'
           && (isSpy && caught(old).size() + 1 < spyCount(old)
             ? changed(['status','votes','caughtIds','result']) && next.status == 'active'
               && caught(next) == caught(old).concat([target]) && next.votes == {} && next.result == null
@@ -109,18 +163,39 @@ service cloud.firestore {
       function finish() {
         let old = resource.data; let next = request.resource.data;
         return old.status in ['active','accusing'] && changed(['status','result']) && next.status == 'ended'
-          && (expired(old) ? next.result == {'reason':'timeout'}
-            : old.status == 'active' && uid() in activeIds(old)
+          && (host(old) && next.result == {'reason':'host'} || old.status == 'active' && uid() in activeIds(old)
               && get(/databases/$(database)/documents/rooms/$(code)/roles/$(request.auth.uid)).data.isSpy == true
               && next.result.keys().hasOnly(['reason','guess','guesserId']) && next.result.get('guesserId', uid()) == uid()
               && next.result.reason == 'guess' && next.result.guess in old.settings.locations);
       }
-      allow update: if signedIn() && fresh(resource.data) && (join() || (member(resource.data) && (
-        remove() || rename() || start() || vote() || finish() || (resource.data.status == 'accusing' && resolveVote())
-        || (host(resource.data) && resource.data.status == 'lobby' && changed(['settings']) && validSettings(request.resource.data.settings))
-        || (host(resource.data) && resource.data.status in ['active','accusing','ended'] && changed(['status','votes','caughtIds','result','startedAt']) && cleared())
-      )));
-      allow delete: if host(resource.data) && resource.data.memberIds == [uid()];
+      function resetRound() {
+        return host(resource.data) && archived(resource.data)
+          && changed(['status','votes','caughtIds','result','startedAt']) && cleared();
+      }
+      function lobbyChange() {
+        return join() || member(resource.data) && (remove() || rename()
+          || host(resource.data) && (changed(['settings']) && validSettings(request.resource.data.settings) || start()));
+      }
+      function roundChange() {
+        let old = resource.data; let next = request.resource.data;
+        return member(old) && (next.status == 'lobby' ? remove() || resetRound()
+          : old.status == 'active' ? (next.status in ['active','accusing'] || next.status == 'ended' && next.result.reason == 'vote' ? vote() : finish())
+          : old.status == 'accusing' && (resolveVote() || finish()));
+      }
+      allow update: if signedIn() && fresh(resource.data)
+        && (resource.data.status == 'lobby' ? lobbyChange() : roundChange());
+      allow delete: if host(resource.data) && resource.data.memberIds == [uid()] && archived(resource.data);
+      match /scores/{id} {
+        allow get: if signedIn();
+        allow list: if member(room(code)) && request.query.limit <= 50;
+        function validScore(old) {
+          let next = request.resource.data;
+          let result = get(/databases/$(database)/documents/results/$(next.lastRoundKey)).data;
+          return result.code == code && next.name == result.players[id].name && next.get('avatarSeed',id) == result.players[id].get('avatarSeed',id) && statsIncrement(old,next,id);
+        }
+        allow create: if validScore({});
+        allow update: if validScore(resource.data);
+      }
       match /secrets/{id} {
         allow get: if member(room(code)) && room(code).status == 'ended';
         allow list: if false;

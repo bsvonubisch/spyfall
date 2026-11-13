@@ -1,4 +1,17 @@
 let context;
+let cueBuffer, loadingCue, playingCue;
+let cueGeneration = 0;
+const cueUrl = new URL('./assets/spy-chord.mp3', import.meta.url).href;
+function preloadCue() {
+  if (cueBuffer) return Promise.resolve(cueBuffer);
+  if (!loadingCue) loadingCue = fetch(cueUrl).then(response => {
+    if (!response.ok) throw new Error('Sound unavailable');
+    return response.arrayBuffer();
+  }).then(bytes => context.decodeAudioData(bytes)).then(buffer => (cueBuffer = buffer)).catch(() => null).finally(() => { loadingCue = null; });
+  return loadingCue;
+}
+function stopCue() { cueGeneration++; playingCue?.stop(); playingCue = null; }
+if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => { if (document.hidden) stopCue(); });
 let enabled = true;
 try { enabled = localStorage.getItem('spyfall-sound') !== 'off'; } catch {}
 export function soundEnabled() { return enabled; }
@@ -8,37 +21,28 @@ export function unlockSound() {
     const Audio = window.AudioContext || window.webkitAudioContext;
     if (!Audio) return;
     context ||= new Audio();
+    void preloadCue();
     if (context.state === 'suspended') context.resume().catch(() => {});
   } catch { /* Game play continues when audio is unavailable. */ }
 }
 export function toggleSound() {
   enabled = !enabled;
   try { localStorage.setItem('spyfall-sound', enabled ? 'on' : 'off'); } catch {}
-  if (enabled) unlockSound();
+  if (enabled) unlockSound(); else stopCue();
   return enabled;
 }
-export function playSpyWin() {
+export async function playSpyWin() {
   if (!enabled || document.hidden || !context || context.state !== 'running') return;
-  const start = context.currentTime;
-  // Original spy-film sting: plucked bass, a dark brass-like minor chord,
-  // and a clipped finish. No samples or melody from an existing soundtrack.
-  const voice = (frequency, offset, duration, volume, type, cutoff) => {
-    const oscillator = context.createOscillator(), gain = context.createGain(), filter = context.createBiquadFilter();
-    const at = start + offset;
-    oscillator.type = type; oscillator.frequency.value = frequency;
-    filter.type = 'lowpass'; filter.frequency.setValueAtTime(cutoff, at);
-    filter.frequency.exponentialRampToValueAtTime(300, at + duration);
-    gain.gain.setValueAtTime(0, at);
-    gain.gain.linearRampToValueAtTime(volume, at + 0.012);
-    gain.gain.exponentialRampToValueAtTime(0.001, at + duration);
-    oscillator.connect(filter); filter.connect(gain); gain.connect(context.destination);
-    oscillator.start(at); oscillator.stop(at + duration + 0.02);
-    oscillator.onended = () => { oscillator.disconnect(); filter.disconnect(); gain.disconnect(); };
-  };
-  voice(82.41, 0, 0.3, 0.22, 'triangle', 1600);
-  voice(123.47, 0.16, 0.25, 0.16, 'triangle', 1800);
-  [164.81, 196, 246.94, 293.66].forEach(frequency => voice(frequency, 0.32, 0.58, 0.055, 'sawtooth', 1900));
-  voice(329.63, 0.94, 0.18, 0.14, 'triangle', 2200);
+  stopCue();
+  const generation = cueGeneration;
+  const buffer = cueBuffer || await Promise.race([preloadCue(), new Promise(resolve => setTimeout(() => resolve(null), 1200))]);
+  if (!buffer || generation !== cueGeneration || !enabled || document.hidden || context.state !== 'running') return;
+  const source = context.createBufferSource();
+  source.buffer = buffer;
+  source.connect(context.destination);
+  playingCue = source;
+  source.onended = () => { source.disconnect(); if (playingCue === source) playingCue = null; };
+  source.start();
 }
 export function playTimeout() {
   if (!enabled || document.hidden || !context || context.state !== 'running') return;
@@ -53,5 +57,30 @@ export function playTimeout() {
     oscillator.connect(gain); gain.connect(context.destination);
     oscillator.start(at); oscillator.stop(at + 0.29);
     oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
+  });
+}
+export function playVote() {
+  if (!enabled || document.hidden || !context || context.state !== 'running') return;
+  const oscillator = context.createOscillator(), gain = context.createGain();
+  const at = context.currentTime;
+  oscillator.type = 'sine';
+  oscillator.frequency.setValueAtTime(740, at);
+  oscillator.frequency.exponentialRampToValueAtTime(1046, at + 0.08);
+  gain.gain.setValueAtTime(0, at);
+  gain.gain.linearRampToValueAtTime(0.1, at + 0.008);
+  gain.gain.exponentialRampToValueAtTime(0.001, at + 0.16);
+  oscillator.connect(gain); gain.connect(context.destination);
+  oscillator.start(at); oscillator.stop(at + 0.18);
+  oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
+}
+export function playVotingSoon() {
+  if (!enabled || document.hidden || !context || context.state !== 'running') return;
+  [523.25, 783.99].forEach((frequency, i) => {
+    const tone = context.createOscillator(), gain = context.createGain(), at = context.currentTime + i * 0.23;
+    tone.type = 'sine'; tone.frequency.value = frequency;
+    gain.gain.setValueAtTime(0, at); gain.gain.linearRampToValueAtTime(0.14, at + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, at + 0.4);
+    tone.connect(gain); gain.connect(context.destination); tone.start(at); tone.stop(at + 0.42);
+    tone.onended = () => { tone.disconnect(); gain.disconnect(); };
   });
 }
