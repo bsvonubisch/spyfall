@@ -40,6 +40,7 @@ dialog[open]::backdrop{animation:screen-arrive .2s ease-out}
 .round-context{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:20px 0 14px;font-size:9px;font-weight:600;letter-spacing:1px;color:var(--muted)}.round-context span+span{font-weight:400;letter-spacing:0}.tabs{scroll-margin-top:72px}
 .button.full,.entry>.button{position:relative;justify-content:center;text-align:center;padding-inline:44px}.button.full>svg,.entry>.button>svg{position:absolute;right:18px}
 .button:has(>svg){position:relative;justify-content:center;text-align:center;padding-inline:40px}.button>svg{position:absolute;right:14px}.settings .add-location-row .button:has(>svg){padding-inline:34px}.settings .add-location-row .button>svg{right:10px}
+.button.outline{background:transparent;border:1px solid #bbc3aa;color:var(--ink)}.button.outline:hover{background:#eceee1}
 @media(max-width:420px){.floating-nav.in-round .brand-name{display:none}}
 @media(max-width:350px){.floating-nav{padding-inline:calc(var(--shell-gutter) - 8px);gap:4px}.nav-actions{gap:0}.nav-timer{min-width:46px;margin-right:0}}
 @media(hover:hover){.nav-icon:hover{background:#e8eadf}.nav-icon.nav-stop:hover{background:#f0cdb8}}
