@@ -1,0 +1,112 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function uid() { return request.auth.uid; }
+    function room(code) { return get(/databases/$(database)/documents/rooms/$(code)).data; }
+    function after(code) { return getAfter(/databases/$(database)/documents/rooms/$(code)).data; }
+    function member(r) { return signedIn() && uid() in r.memberIds; }
+    function host(r) { return signedIn() && r.hostId == uid(); }
+    function fresh(r) { return request.time < r.createdAt + duration.value(24, 'h'); }
+    function validSettings(s) {
+      return s.keys().hasOnly(['minutes', 'voting', 'locations'])
+        && s.minutes is int && s.minutes >= 2 && s.minutes <= 20
+        && s.voting in ['majority', 'unanimous']
+        && s.locations is list && s.locations.size() >= 3 && s.locations.size() <= 40
+        && s.locations.toSet().size() == s.locations.size();
+    }
+    function expired(r) { return request.time >= r.startedAt + duration.value(r.settings.minutes, 'm'); }
+    function voteAt(r, i, target) { return r.memberIds.size() > i && r.votes.get(r.memberIds[i], '') == target ? 1 : 0; }
+    function count(r, target) {
+      return voteAt(r,0,target) + voteAt(r,1,target) + voteAt(r,2,target) + voteAt(r,3,target)
+        + voteAt(r,4,target) + voteAt(r,5,target) + voteAt(r,6,target) + voteAt(r,7,target)
+        + voteAt(r,8,target) + voteAt(r,9,target) + voteAt(r,10,target) + voteAt(r,11,target);
+    }
+    function passed(r, target) {
+      return r.settings.voting == 'unanimous' ? count(r,target) >= r.memberIds.size() - 1 : count(r,target) > r.memberIds.size() / 2;
+    }
+    match /rooms/{code} {
+      // A room code grants access to the non-secret lobby; listing rooms is denied.
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn() && code.matches('^[A-Z2-9]{6}$')
+        && request.resource.data.keys().hasOnly(['hostId','memberIds','players','status','settings','roundId','votes','createdAt'])
+        && request.resource.data.hostId == uid()
+        && request.resource.data.memberIds == [uid()]
+        && request.resource.data.players.keys().hasOnly([uid()])
+        && validPlayer(request.resource.data.players[uid()])
+        && request.resource.data.status == 'lobby' && request.resource.data.roundId == 0
+        && request.resource.data.votes == {} && request.resource.data.createdAt == request.time
+        && validSettings(request.resource.data.settings);
+      function validPlayer(p) { return p.keys().hasOnly(['id','name']) && p.id == uid() && p.name is string && p.name.size() >= 1 && p.name.size() <= 20; }
+      function changed(keys) { return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys); }
+      function join() {
+        let old = resource.data; let next = request.resource.data;
+        return old.status == 'lobby' && !(uid() in old.memberIds) && old.memberIds.size() < 12
+          && changed(['memberIds','players']) && next.memberIds == old.memberIds.concat([uid()])
+          && next.players.diff(old.players).affectedKeys().hasOnly([uid()]) && validPlayer(next.players[uid()]);
+      }
+      function remove() {
+        let old = resource.data; let next = request.resource.data;
+        let removed = old.memberIds.removeAll(next.memberIds);
+        return old.status == 'lobby' && changed(['memberIds','players','hostId'])
+          && removed.size() == 1 && next.memberIds == old.memberIds.removeAll(removed) && next.memberIds.size() >= 1
+          && (host(old) || removed[0] == uid())
+          && next.players.diff(old.players).affectedKeys().hasOnly(removed)
+          && next.players.keys().toSet() == next.memberIds.toSet()
+          && next.hostId == (old.hostId == removed[0] ? next.memberIds[0] : old.hostId);
+      }
+      function start() {
+        let old = resource.data; let next = request.resource.data;
+        let secret = getAfter(/databases/$(database)/documents/rooms/$(code)/secrets/current).data;
+        return host(old) && old.status == 'lobby' && old.memberIds.size() >= 3
+          && changed(['status','roundId','startedAt','votes','result'])
+          && next.status == 'active' && next.roundId == old.roundId + 1 && next.startedAt == request.time
+          && next.votes == {} && next.result == null && secret.roundId == next.roundId;
+      }
+      function vote() {
+        let old = resource.data; let next = request.resource.data; let target = next.votes[uid()];
+        return old.status == 'active' && !expired(old) && changed(['votes','status','result'])
+          && next.votes.diff(old.votes).affectedKeys().hasOnly([uid()]) && target in old.memberIds && target != uid()
+          && (passed(next,target)
+            ? next.status == 'ended' && next.result == {'reason':'vote','accusedId':target}
+            : next.status == 'active' && next.result == old.result);
+      }
+      function finish() {
+        let old = resource.data; let next = request.resource.data;
+        return old.status == 'active' && changed(['status','result']) && next.status == 'ended'
+          && (expired(old) ? next.result == {'reason':'timeout'}
+            : get(/databases/$(database)/documents/rooms/$(code)/roles/$(request.auth.uid)).data.isSpy == true
+              && next.result.keys().hasOnly(['reason','guess']) && next.result.reason == 'guess' && next.result.guess in old.settings.locations);
+      }
+      allow update: if signedIn() && fresh(resource.data) && (join() || (member(resource.data) && (
+        remove() || start() || vote() || finish()
+        || (host(resource.data) && resource.data.status == 'lobby' && changed(['settings']) && validSettings(request.resource.data.settings))
+        || (host(resource.data) && resource.data.status == 'ended' && changed(['status','votes','result','startedAt'])
+          && request.resource.data.status == 'lobby' && request.resource.data.votes == {} && request.resource.data.result == null && !('startedAt' in request.resource.data))
+      )));
+      allow delete: if host(resource.data) && resource.data.status == 'lobby' && resource.data.memberIds == [uid()];
+      match /secrets/{id} {
+        allow get: if member(room(code)) && room(code).status == 'ended';
+        allow list: if false;
+        allow create, update: if id == 'current' && host(room(code)) && room(code).status == 'lobby'
+          && after(code).status == 'active' && request.resource.data.keys().hasOnly(['spyId','location','roundId'])
+          && request.resource.data.roundId == after(code).roundId && request.resource.data.spyId in room(code).memberIds
+          && request.resource.data.location in room(code).settings.locations;
+        allow delete: if host(room(code)) && room(code).status == 'ended' && after(code).status == 'lobby';
+      }
+      match /roles/{id} {
+        allow get: if member(room(code)) && uid() == id && room(code).status in ['active','ended'];
+        allow list: if false;
+        function validRole() {
+          let s = getAfter(/databases/$(database)/documents/rooms/$(code)/secrets/current).data;
+          return request.resource.data == {'roundId':s.roundId,'isSpy':id == s.spyId,'location':id == s.spyId ? null : s.location};
+        }
+        allow create, update: if host(room(code)) && room(code).status == 'lobby' && after(code).status == 'active'
+          && id in room(code).memberIds && validRole();
+        allow delete: if host(room(code)) && room(code).status == 'ended' && after(code).status == 'lobby';
+      }
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}
