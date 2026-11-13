@@ -4,7 +4,8 @@ import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { execute } from './game.js';
 
 const useEmulators = import.meta.env.VITE_USE_EMULATORS === 'true';
-const config = useEmulators ? { apiKey: 'demo-key', authDomain: 'demo-spyfall.firebaseapp.com', projectId: 'demo-spyfall', appId: 'demo-spyfall' } : JSON.parse(import.meta.env.VITE_FIREBASE_CONFIG);
+const config = useEmulators ? { apiKey: 'demo-key', authDomain: 'demo-spyfall.firebaseapp.com', projectId: 'demo-spyfall', appId: 'demo-spyfall' }
+  : JSON.parse(import.meta.env.VITE_FIREBASE_CONFIG);
 const app = initializeApp(config);
 export const auth = getAuth(app);
 export const db = getFirestore(app);

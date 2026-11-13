@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
 import { doc, getDoc, getDocs, collection, updateDoc, Timestamp, onSnapshot, disableNetwork, enableNetwork } from 'firebase/firestore';
-import { execute, DEFAULT_SETTINGS, resolveResult, validSettings } from '../src/game.js';
+import { execute, DEFAULT_SETTINGS, resolveResult, validSettings, eligiblePlayers, threshold } from '../src/game.js';
 import { membershipState } from '../src/room-view.js';
 
 let env;
@@ -57,6 +57,18 @@ test('wrong spy guess gives the group a win', async () => {
   const s = (await getDoc(doc(db('p0'), 'rooms', code, 'secrets', 'current'))).data();
   assert.equal(resolveResult(r.result, s).winner, 'players');
 });
+test('the spy can vote for an innocent player and help pass an accusation', async () => {
+  const code = await lobby(); const { spy, civilian, room } = await start(code);
+  await execute(db(spy.id), spy.id, { action: 'vote', code, roundId: 1, target: civilian.id });
+  const voted = (await getDoc(doc(db(spy.id), 'rooms', code))).data();
+  assert.equal(voted.votes[spy.id], civilian.id);
+  assert.equal(voted.status, 'active');
+  const other = room.memberIds.find(id => id !== spy.id && id !== civilian.id);
+  await execute(db(other), other, { action: 'vote', code, roundId: 1, target: civilian.id });
+  const ended = (await getDoc(doc(db(spy.id), 'rooms', code))).data();
+  const secret = (await getDoc(doc(db(spy.id), 'rooms', code, 'secrets', 'current'))).data();
+  assert.equal(resolveResult(ended.result, secret).winner, 'spy');
+});
 test('majority vote ends exactly once, even with concurrent votes', async () => {
   const code = await lobby(5); const { spy, room } = await start(code);
   const voters = room.memberIds.filter(id => id !== spy.id);
@@ -85,8 +97,8 @@ test('timeout is enforced by server time; clients cannot end early', async () =>
   await execute(db('p1'), 'p1', { action: 'expire', code, roundId: 1 });
   assert.equal((await getDoc(doc(db('p0'), 'rooms', code))).data().result.reason, 'timeout');
 });
-test('host transfer, removal, capacity, and a full 12-player deal', async () => {
-  const code = await lobby(12);
+test('host transfer, removal, capacity, and a full 15-player deal', async () => {
+  const code = await lobby(15);
   await assert.rejects(execute(db('overflow'), 'overflow', { action: 'join', code, name: 'Extra' }));
   await start(code);
   await execute(db('p0'), 'p0', { action: 'reset', code }).then(() => assert.fail('Cannot reset active round'), () => {});
@@ -101,6 +113,128 @@ test('settings reject invalid durations, duplicate locations, and invalid voting
   assert.throws(() => validSettings({ ...DEFAULT_SETTINGS, minutes: 0 }));
   assert.throws(() => validSettings({ ...DEFAULT_SETTINGS, voting: 'anything' }));
   assert.throws(() => validSettings({ ...DEFAULT_SETTINGS, locations: ['Beach', 'beach', 'Train'] }));
+  for (const spies of [0, 8, 1.5, '2']) assert.throws(() => validSettings({ ...DEFAULT_SETTINGS, spies }));
+});
+
+async function accuse(code, target) {
+  const room = (await getDoc(doc(db('p0'), 'rooms', code))).data();
+  const voters = eligiblePlayers(room).filter(id => id !== target).slice(0, threshold(room));
+  for (const id of voters) await execute(db(id), id, { action: 'vote', code, roundId: room.roundId, target });
+  return (await getDoc(doc(db('p0'), 'rooms', code))).data();
+}
+
+test('multiple spies must all be caught; caught spies cannot act and the secret stays private', async () => {
+  const code = await lobby(5);
+  await execute(db('p0'), 'p0', { action: 'settings', code, settings: { ...DEFAULT_SETTINGS, spies: 2 } });
+  const { roles, civilian, room } = await start(code), spies = roles.filter(r => r.isSpy);
+  assert.equal(spies.length, 2);
+  assert.ok(spies.every(r => r.location === null));
+  let r = await accuse(code, spies[0].id);
+  assert.equal(r.status, 'active'); assert.deepEqual(r.caughtIds, [spies[0].id]); assert.deepEqual(r.votes, {});
+  assert.equal(r.startedAt.toMillis(), room.startedAt.toMillis());
+  await assertFails(getDoc(doc(db(civilian.id), 'rooms', code, 'secrets', 'current')));
+  await assertFails(getDoc(doc(db(civilian.id), 'rooms', code, 'roles', spies[1].id)));
+  await assert.rejects(execute(db(spies[0].id), spies[0].id, { action: 'vote', code, roundId: 1, target: civilian.id }));
+  await assert.rejects(execute(db(civilian.id), civilian.id, { action: 'vote', code, roundId: 1, target: spies[0].id }));
+  await assertFails(updateDoc(doc(db(spies[0].id), 'rooms', code), { votes: { [spies[0].id]: civilian.id } }));
+  await assertFails(updateDoc(doc(db(spies[0].id), 'rooms', code), { status: 'ended', result: { reason: 'guess', guess: civilian.location, guesserId: spies[0].id } }));
+  await assertFails(updateDoc(doc(db(civilian.id), 'rooms', code), { caughtIds: spies.map(s => s.id) }));
+  r = await accuse(code, spies[1].id);
+  assert.equal(r.status, 'ended');
+  const secret = (await getDoc(doc(db('p0'), 'rooms', code, 'secrets', 'current'))).data();
+  assert.equal(resolveResult(r.result, secret).winner, 'players');
+  await execute(db('p0'), 'p0', { action: 'reset', code });
+  assert.deepEqual((await getDoc(doc(db('p0'), 'rooms', code))).data().caughtIds, []);
+});
+
+test('multi-spy wrong accusations and guesses still end the round', async () => {
+  const code = await lobby(5);
+  await execute(db('p0'), 'p0', { action: 'settings', code, settings: { ...DEFAULT_SETTINGS, spies: 2, voting: 'unanimous' } });
+  const { civilian } = await start(code);
+  const r = await accuse(code, civilian.id);
+  assert.equal(r.status, 'ended');
+  const secret = (await getDoc(doc(db('p0'), 'rooms', code, 'secrets', 'current'))).data();
+  assert.equal(resolveResult(r.result, secret).winner, 'spy');
+  await execute(db('p0'), 'p0', { action: 'reset', code });
+  const next = await start(code), wrong = DEFAULT_SETTINGS.locations.find(l => l !== next.civilian.location);
+  await execute(db(next.spy.id), next.spy.id, { action: 'guess', code, roundId: 2, location: wrong });
+  const ended = (await getDoc(doc(db('p0'), 'rooms', code))).data();
+  const answer = (await getDoc(doc(db('p0'), 'rooms', code, 'secrets', 'current'))).data();
+  assert.equal(resolveResult(ended.result, answer).winner, 'players');
+});
+
+test('only the confirmed accused role is readable during resolution; any member can finish it', async () => {
+  const code = await lobby(5);
+  await execute(db('p0'), 'p0', { action: 'settings', code, settings: { ...DEFAULT_SETTINGS, spies: 2 } });
+  const { spy, civilian, roles } = await start(code);
+  const voters = roles.filter(r => r.id !== spy.id).slice(0, 3);
+  for (const p of voters.slice(0, 2)) await execute(db(p.id), p.id, { action: 'vote', code, roundId: 1, target: spy.id });
+  const votes = Object.fromEntries(voters.map(p => [p.id, spy.id]));
+  await updateDoc(doc(db(voters[2].id), 'rooms', code), { votes, status: 'accusing', result: { reason: 'vote', accusedId: spy.id } });
+  await assertSucceeds(getDoc(doc(db(civilian.id), 'rooms', code, 'roles', spy.id)));
+  await assertFails(getDoc(doc(db(civilian.id), 'rooms', code, 'secrets', 'current')));
+  const other = roles.find(r => r.id !== spy.id && r.id !== civilian.id);
+  await assertFails(getDoc(doc(db(civilian.id), 'rooms', code, 'roles', other.id)));
+  await assertFails(updateDoc(doc(db(civilian.id), 'rooms', code), { status: 'ended' }));
+  await execute(db(civilian.id), civilian.id, { action: 'resolve-vote', code, roundId: 1 });
+  assert.equal((await getDoc(doc(db('p0'), 'rooms', code))).data().status, 'active');
+});
+
+test('seven spies can be dealt to fifteen players and votes from slots 13–15 count', async () => {
+  const code = await lobby(15);
+  await execute(db('p0'), 'p0', { action: 'settings', code, settings: { ...DEFAULT_SETTINGS, spies: 7 } });
+  assert.equal((await start(code)).roles.filter(r => r.isSpy).length, 7);
+  await execute(db('p0'), 'p0', { action: 'stop', code });
+  await execute(db('p0'), 'p0', { action: 'settings', code, settings: DEFAULT_SETTINGS });
+  await start(code);
+  for (let i = 7; i < 15; i++) await execute(db(`p${i}`), `p${i}`, { action: 'vote', code, roundId: 2, target: 'p0' });
+  assert.equal((await getDoc(doc(db('p0'), 'rooms', code))).data().status, 'ended');
+});
+
+test('a multi-spy round cannot start without enough players; names can only be changed by their owner in the lobby', async () => {
+  const code = await lobby(4);
+  await execute(db('p0'), 'p0', { action: 'settings', code, settings: { ...DEFAULT_SETTINGS, spies: 2 } });
+  await assert.rejects(execute(db('p0'), 'p0', { action: 'start', code }));
+  await execute(db('p1'), 'p1', { action: 'rename', code, name: 'Agent One' });
+  const ref = doc(db('p1'), 'rooms', code), r = (await getDoc(ref)).data();
+  assert.equal(r.players.p1.name, 'Agent One');
+  await assertFails(updateDoc(ref, { players: { ...r.players, p2: { id: 'p2', name: 'Tampered' } } }));
+  await execute(db('p0'), 'p0', { action: 'settings', code, settings: DEFAULT_SETTINGS });
+  await start(code);
+  await assertFails(updateDoc(ref, { players: { ...r.players, p1: { id: 'p1', name: 'Changed' } } }));
+});
+test('only the host can stop a round; stopping clears roles and allows a restart', async () => {
+  const code = await lobby(); await start(code);
+  await assert.rejects(execute(db('p1'), 'p1', { action: 'stop', code }));
+  await execute(db('p0'), 'p0', { action: 'stop', code });
+  assert.equal((await getDoc(doc(db('p0'), 'rooms', code))).data().status, 'lobby');
+  await env.withSecurityRulesDisabled(async c => assert.equal((await getDoc(doc(c.firestore(), 'rooms', code, 'secrets', 'current'))).exists(), false));
+  assert.equal((await start(code)).room.roundId, 2);
+});
+
+test('stopping a round keeps room and own-role listeners synchronized without permission errors', async () => {
+  const code = await lobby(); await start(code);
+  const phone = db('p1'), errors = [], stops = [];
+  let lobbySeen, roleDeleted;
+  const lobbyUpdate = new Promise(resolve => { lobbySeen = resolve; });
+  const roleUpdate = new Promise(resolve => { roleDeleted = resolve; });
+  const firstRoom = new Promise(resolve => stops.push(onSnapshot(doc(phone, 'rooms', code), snap => { resolve(); if (snap.data().status === 'lobby') lobbySeen(); }, error => errors.push(error))));
+  const firstRole = new Promise(resolve => stops.push(onSnapshot(doc(phone, 'rooms', code, 'roles', 'p1'), snap => { resolve(); if (!snap.exists()) roleDeleted(); }, error => errors.push(error))));
+  try {
+    await Promise.all([firstRoom, firstRole]);
+    await execute(db('p0'), 'p0', { action: 'stop', code });
+    await Promise.all([lobbyUpdate, roleUpdate]);
+    assert.deepEqual(errors, []);
+  } finally { stops.forEach(stop => stop()); }
+});
+test('a player can exit an active round; the remaining players return to the lobby', async () => {
+  const code = await lobby(); await start(code);
+  await execute(db('p1'), 'p1', { action: 'leave', code });
+  const room = (await getDoc(doc(db('p0'), 'rooms', code))).data();
+  assert.equal(room.status, 'lobby'); assert.deepEqual(room.memberIds, ['p0','p2']);
+  await start(code);
+  await execute(db('p0'), 'p0', { action: 'leave', code });
+  assert.equal((await getDoc(doc(db('p2'), 'rooms', code))).data().hostId, 'p2');
 });
 test('two-player testing can start and resolve a vote; one player cannot start', async () => {
   const code = await lobby(1);
