@@ -40,7 +40,19 @@ function errorMessage(error) {
 }
 function header() {
   const r = state.room, active = inRound(r);
-  return `<header class="floating-nav"><div class="nav-main"><a class="brand" href="/" aria-label="Spyfall home"><span class="brand-icon">${icon('eye', 26)}</span>spyfall<span class="brand-dot">✳</span></a><div class="header-tools">${active ? `<div class="nav-timer">${icon('clock', 16)}<span id="timer" aria-label="Time remaining">--:--</span></div>` : '<span class="edition">THE SOCIAL<br>DEDUCTION GAME</span>'}<button type="button" class="sound-control" data-action="sound" aria-pressed="${soundEnabled()}">Sound ${soundEnabled() ? 'on' : 'off'}</button></div></div>${r ? `<nav class="room-nav" aria-label="Room navigation"><span class="room-tag">${esc(state.code)}${active ? ` · ROUND ${r.roundId}` : ''}</span><div>${active && r.hostId === state.uid ? '<button type="button" class="nav-stop" data-action="stop">Stop round</button>' : ''}<button type="button" class="nav-exit" data-action="exit-room">${icon('exit', 15)} Exit</button></div></nav>` : ''}</header>`;
+  return `<header class="floating-nav ${active ? 'in-round' : ''}">
+    <a class="brand" href="/" aria-label="Spyfall home"><span class="brand-icon">${icon('eye', 23)}</span><span class="brand-name">spyfall<span class="brand-dot">✳</span></span></a>
+    ${r ? `<span class="room-tag" aria-label="Room ${esc(state.code)}" title="Room code">${esc(state.code)}</span>` : ''}
+    <nav class="nav-actions" aria-label="${r ? 'Room' : 'Game'} controls">
+      ${active ? '<div class="nav-timer"><span id="timer" aria-label="Time remaining">--:--</span></div>' : ''}
+      <button type="button" class="nav-icon sound-control" data-action="sound" aria-label="Sound" aria-pressed="${soundEnabled()}" title="${soundEnabled() ? 'Mute sound' : 'Enable sound'}">${soundIcon()}</button>
+      ${active && r.hostId === state.uid ? '<button type="button" class="nav-icon nav-stop" data-action="stop" aria-label="Stop round" title="Stop round"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="3"/></svg></button>' : ''}
+      ${r ? `<button type="button" class="nav-icon nav-exit" data-action="exit-room" aria-label="Exit room" title="Exit room">${icon('exit', 20)}</button>` : ''}
+    </nav>
+  </header>`;
+}
+function soundIcon() {
+  return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m11 4-5 4H3v8h3l5 4Z"/>${soundEnabled() ? '<path d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>' : '<path d="m16 9 6 6m0-6-6 6"/>'}</svg>`;
 }
 function shell(content, footer = 'A little suspicion brings people together.') {
   const screen = `${state.code}:${inRound(state.room) ? 'round' : state.room?.status || 'home'}:${state.room?.roundId || 0}:${state.room?.status === 'lobby' ? state.tab : ''}`;
@@ -105,7 +117,7 @@ function lobby() {
   shell(`<div class="lobby-intro"><h1>${host ? 'Gather your suspects.' : 'You’re in. Look innocent.'}</h1><p>${host ? 'Scan the code or share the link to join.' : 'Your host will start the round.'}</p></div>
     <section class="invite panel"><div><label>ROOM CODE</label><strong class="room-code">${esc(state.code)}</strong><button class="text-button" data-action="share">${icon('copy', 16)} Copy invite link</button></div><canvas id="qr" aria-label="Scan to join this room" role="img"></canvas></section>
     <div class="tabs" role="tablist" aria-label="Lobby sections"><button role="tab" aria-selected="${state.tab === 'players'}" data-action="players">Players <span>${r.players.length}/${MAX_PLAYERS}</span></button><button role="tab" aria-selected="${state.tab === 'rules'}" data-action="rules">Game rules ${icon('clock', 16)}</button></div>
-    ${state.tab === 'players' ? `<section class="panel roster">${playerList()}${needed > 0 ? `<p class="waiting">Waiting for ${needed} more ${needed === 1 ? 'player' : 'players'} for ${spyLabel(r.settings.spies)}…</p>` : ''}</section><div class="round-summary">${icon('clock', 16)} ${r.settings.minutes} min <span>·</span> ${r.settings.locations.length} locations <span>·</span> ${spyLabel(r.settings.spies)}</div>${host ? '<button class="button secondary full edit-rules" data-action="rules">Edit game rules</button>' : ''}` : rules()}
+    ${state.tab === 'players' ? `<section class="panel roster">${playerList()}${needed > 0 ? `<p class="waiting">Waiting for ${needed} more ${needed === 1 ? 'player' : 'players'} for ${spyLabel(r.settings.spies)}…</p>` : ''}</section><div class="round-summary">${icon('clock', 16)} ${r.settings.minutes} min <span>·</span> ${r.settings.locations.length} locations <span>·</span> ${spyLabel(r.settings.spies)}</div>` : rules()}
     <div class="bottom-action">${host ? `<button class="button primary full" data-action="start" ${needed > 0 ? 'disabled' : ''}>Start the game ${icon('arrow')}</button>` : `<div class="waiting-host"><span class="pulse"></span> Waiting for the host to start</div>`}</div>`);
   QRCode.toCanvas($('#qr'), inviteUrl(), { width: 116, margin: 1, color: { dark: '#252a25', light: '#ffffff' } }).catch(() => notice('QR code unavailable. You can still share the invite link.'));
 }
@@ -117,8 +129,7 @@ function active() {
     <p class="fineprint">Spies can tap a location to make a guess. Everyone can use this list to ask questions.</p>
     <div class="location-chips guess-grid">${r.settings.locations.map(l => `<button data-action="guess" data-location="${esc(l)}" aria-label="Guess ${esc(l)}" ${r.status === 'accusing' || r.caughtIds.includes(state.uid) ? 'disabled' : ''}>${esc(l)}</button>`).join('')}</div>
   </section>`;
-  shell(`<div class="active-spacer"></div>
-    ${r.settings.spies > 1 ? `<p class="spy-progress">${r.caughtIds.length}/${r.settings.spies} spies caught · Catch them all to win</p>` : ''}
+  shell(`<div class="round-context"><span>ROUND ${String(r.roundId).padStart(2, '0')}</span>${r.settings.spies > 1 ? `<span>${r.caughtIds.length}/${r.settings.spies} spies caught</span>` : ''}</div>
     ${r.status === 'accusing' ? '<p class="round-status" role="status"><span class="pulse"></span> Checking the accusation…</p>' : ''}
     ${r.caughtIds.includes(state.uid) ? '<p class="round-status">You’ve been caught. Watch the remaining players finish the round.</p>' : ''}
     <section class="role-card ${state.reveal && spy ? 'spy-card' : ''}" id="role-card"><div id="role-content">${roleContent(role)}</div><button class="button secondary hold-reveal" id="reveal-role" type="button" aria-pressed="${state.reveal}" aria-describedby="reveal-help" ${!role ? 'disabled' : ''}>Hold to reveal ${icon('eye')}</button><p id="reveal-help" class="reveal-help">Release to hide. Keyboard: hold Space or Enter.</p></section>
@@ -291,7 +302,7 @@ $('#app').addEventListener('click', event => {
   }
   if (type === 'stop') return confirmAction('Stop this round?', 'Everyone will return to the lobby. No winner will be recorded.', 'Stop round', () => action('stop'));
   if (type === 'exit-room') return confirmAction('Exit the room?', state.room.status === 'lobby' ? 'You can rejoin using the room code. If you are hosting, the next player becomes host.' : 'This will return everyone to the lobby and reset the round. If you are hosting, the next player becomes host.', 'Exit room', async () => { await action('leave'); disconnect(); state.code = ''; history.replaceState(null, '', '/'); render(); });
-  if (type === 'sound') { toggleSound(); button.textContent = `Sound ${soundEnabled() ? 'on' : 'off'}`; button.setAttribute('aria-pressed', String(soundEnabled())); return; }
+  if (type === 'sound') { toggleSound(); button.innerHTML = soundIcon(); button.setAttribute('aria-pressed', String(soundEnabled())); button.title = soundEnabled() ? 'Mute sound' : 'Enable sound'; return; }
   if (type === 'add-location' || type === 'remove-location') return editLocation(type, Number(button.dataset.index));
   if (type === 'refresh-result') return loadResult();
   if (type === 'create') return run(async () => { const { code } = await callGame({ action: 'create', name: getName() }); await connect(code); });
