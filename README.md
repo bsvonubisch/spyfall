@@ -34,6 +34,7 @@ Majority voting requires more than half of the players still in play to vote for
 - The supplied [James Bond Spy Chord recording by Nicolas](https://www.youtube.com/watch?v=AejxyoO6ILo) when the spy guesses correctly, with a per-device Sound on/off control. Mobile browsers require an interaction to enable audio; sounds are not queued while the page is hidden or replayed when an old result is reopened.
 - Separate sounds mark votes, the final minute, the advisory timer reaching zero, and other round endings. Illustrated avatars are saved as a portrait seed in each Firestore profile. **Edit profile → New avatar** previews a new portrait; **Save profile** saves it with the name. Avatars appear in rosters, results, player confirmations, and leaderboards, and never indicate a role.
 - Anonymous play stays the default. Connect Google with the icon inside the home-screen name field, or from Edit profile, to use a Google name and photo and keep the profile across devices. First-time linking preserves the guest UID, scores, and saved locations. Signing into an already-existing Google profile asks before switching; separate guest records are not merged. Generated avatars remain available after connecting Google.
+- Google names/photos come from the linked provider record, including accounts with empty top-level Firebase profile fields. A private import marker repairs older sign-ins on reload and preserves later custom names/avatars. Explicitly connecting Google imports its current name and photo again. Sign-in controls use the unmodified icon from [Google’s official branding assets](https://developers.google.com/identity/branding-guidelines).
 - Rejoin the same room after refreshing, using the same browser identity.
 - Host transfers to the next player if the host leaves the lobby.
 - Navigation stays at the top while scrolling, with the round timer, sound toggle, host-only Round controls, and Exit controls. Cancelling returns everyone to the lobby without scores; exiting during a round also resets it and removes the exiting player, transferring the host if necessary.
@@ -75,6 +76,7 @@ Click the plain “made with ♥ by vonUbisch” footer credit to connect an acc
 - Usage records visits, screen views, room creation/join/exit, round start/host end/cancel, votes, guesses, rule/profile changes, Google connections, invite copies, role reveals, question cycling, leaderboard views, and location-set changes. It stores event types, a session ID, UID, room/round references, device category, and server receipt time. It never stores the role, secret location, guessed answer, Google email, or input contents in usage events. Completed rounds are counted from verified result archives.
 - Client telemetry is best effort, with a bounded local retry queue. It is suitable for usage trends, not tamper-proof auditing or precise offline event timing. Earlier unrecorded visits and votes cannot be reconstructed.
 - Saved location lists live in `profiles/{uid}/preferences/game` and are readable/writable only by their owner. A guest keeps them in this browser; linking Google keeps them across devices.
+- The Google profile import marker lives in `profiles/{uid}/preferences/identity`. Only the owner of a Google-linked account can create/update it; other players cannot read it.
 - `usage` events are immutable and admin-query-only. `presence` records are writable only by their owner; reporting a live room requires room membership. Heartbeats and usage events consume the existing Spark quota. No paid services or Functions are introduced. Old inactive presence and usage records can be removed during periodic owner maintenance.
 
 ### Backfill existing records
@@ -160,6 +162,7 @@ Rooms accept changes for 24 hours. Old rooms are not automatically deleted: peri
 - `src/game.js` — Firestore transactions and game flow.
 - `src/scores.js` — profiles, verified results, and idempotent leaderboard awards.
 - `src/account.js` — anonymous-to-Google linking and account switching.
+- `src/google-profile.js` — provider-specific profile import and recovery of older linked accounts.
 - `src/admin.js`, `src/usage.js` — owner analytics, usage events, and live presence.
 - `src/game-table.css` — frosted navy layout and compact floating navigation.
 - `public/wordmark.svg`, `public/favicon.svg` — selected suspicious-wordmark logo.

@@ -5,6 +5,7 @@ import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebas
 import { doc, getDoc, getDocs, collection, updateDoc, setDoc, writeBatch, serverTimestamp, query, orderBy, limit, Timestamp, onSnapshot, disableNetwork, enableNetwork } from 'firebase/firestore';
 import { settleRound, awardResult, updateProfile } from '../src/scores.js';
 import { loadAdminStats, watchLiveStats } from '../src/admin.js';
+import { googleProfile, syncGoogleProfile } from '../src/google-profile.js';
 import { initializeApp, deleteApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator, signInAnonymously, linkWithCredential, GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
@@ -50,9 +51,34 @@ test('linking a Google identity retains the guest UID, profile, and saved locati
     assert.deepEqual((await getDoc(doc(firestore, 'profiles', linked.uid, 'preferences', 'game'))).data().locations, locations);
     assert.equal((await getDoc(doc(firestore, 'profiles', linked.uid))).data().name, 'Guest');
     assert.ok((await linked.getIdTokenResult()).claims.firebase.identities['google.com']);
+    // Real linked guests can have empty top-level fields while Google has both.
+    const providerOnly = { uid: linked.uid, providerData: linked.providerData, displayName: null, photoURL: null };
+    const imported = await syncGoogleProfile(firestore, providerOnly, { code });
+    assert.equal(imported.name, 'Google test');
+    assert.equal(imported.avatarUrl, 'https://lh3.googleusercontent.com/a/test-photo');
+    assert.equal((await getDoc(doc(firestore, 'rooms', code))).data().players[linked.uid].avatarUrl, imported.avatarUrl);
+    assert.equal((await getDoc(doc(firestore, 'rooms', code))).data().players[linked.uid].name, imported.name);
+    const markerRef = doc(firestore, 'profiles', linked.uid, 'preferences', 'identity');
+    assert.equal((await getDoc(markerRef)).data().googleProfileApplied, true);
+    await assertFails(getDoc(doc(db('other'), 'profiles', linked.uid, 'preferences', 'identity')));
+    await assertFails(setDoc(doc(db('other'), 'profiles', linked.uid, 'preferences', 'identity'), { googleProfileApplied: true, updatedAt: serverTimestamp() }));
+    await updateProfile(firestore, linked.uid, { name: 'My codename', avatarSeed: 'my-new-avatar', avatarUrl: '' });
+    const custom = await syncGoogleProfile(firestore, providerOnly);
+    assert.equal(custom.name, 'My codename'); assert.equal(custom.avatarUrl, ''); assert.equal(custom.avatarSeed, 'my-new-avatar');
+    const reconnected = await syncGoogleProfile(firestore, providerOnly, { force: true, code });
+    assert.equal(reconnected.name, 'Google test'); assert.equal(reconnected.gamesPlayed, 0);
+    assert.deepEqual((await getDoc(doc(firestore, 'profiles', linked.uid, 'preferences', 'game'))).data().locations, locations);
     const restored = (await signInWithCredential(auth, credential)).user;
     assert.equal(restored.uid, guest.uid);
   } finally { await deleteApp(app); }
+});
+
+test('Google profile fields prefer provider data, retain safe fallbacks, and never use an unsafe photo URL', () => {
+  const user = { uid: 'agent', displayName: 'Old Firebase name', photoURL: 'https://lh3.googleusercontent.com/old', providerData: [{ providerId: 'google.com', displayName: ' Google Provider Name ', photoURL: 'https://lh3.googleusercontent.com/new' }] };
+  assert.equal(googleProfile(user).name, 'Google Provider Name');
+  assert.equal(googleProfile(user).avatarUrl, 'https://lh3.googleusercontent.com/new');
+  assert.equal(googleProfile({ ...user, photoURL: null, providerData: [{ providerId: 'google.com', photoURL: 'javascript:alert(1)' }] }).avatarUrl, '');
+  assert.equal(googleProfile({ uid: 'agent', providerData: [] }, { name: 'Saved name', avatarSeed: 'custom' }).name, 'Saved name');
 });
 
 test('only the verified Google owner can query admin data, without access to private active roles', async () => {

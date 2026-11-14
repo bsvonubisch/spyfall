@@ -2,18 +2,19 @@ import './style.css';
 import './game-table.css';
 import QRCode from 'qrcode';
 import { doc, onSnapshot, getDoc, getDocs, collection, query, orderBy, limit } from 'firebase/firestore';
-import { onAuthStateChanged } from 'firebase/auth';
+import { onIdTokenChanged } from 'firebase/auth';
 import { normalizeRoom, resolveResult, threshold, eligiblePlayers, requiredPlayers, MAX_PLAYERS, MAX_SPIES } from './game.js';
 import { membershipState } from './room-view.js';
 import { LOCATION_SETS, locationSetId } from './locations.js';
 import { unlockSound, toggleSound, soundEnabled, playSpyWin, playTimeout, playVote, playVotingSoon } from './sound.js';
-import { avatar, playerAvatar, safeAvatarUrl } from './avatars.js';
+import { avatar, playerAvatar } from './avatars.js';
 import { QUESTION_IDEAS } from './questions.js';
 import { clockCue } from './round-clock.js';
 import { bindDialogViewport } from './dialog.js';
 import { settleRound, saveProfile, updateProfile } from './scores.js';
 import { auth, db, identity, callGame } from './firebase.js';
 import { googleAccount, adminAccount, connectGoogle, useGoogleAccount, returnToGuest, accountError } from './account.js';
+import { googleProfile, syncGoogleProfile } from './google-profile.js';
 import { loadAdminStats, watchLiveStats } from './admin.js';
 import { startUsage, stopUsage, trackUsage, usageScreen } from './usage.js';
 
@@ -24,6 +25,9 @@ const icon = (name, size = 20) => `<svg width="${size}" height="${size}" viewBox
 const state = { code: new URLSearchParams(location.search).get('room')?.toUpperCase() || '', room: null, role: null, uid: null, tab: 'players', reveal: false, busy: false, loading: false, draft: null, stops: [], clockOffset: 0 };
 let savedName = '';
 let ownProfile = null, accountChanging = false, adminStats = null;
+let profileIdentity = '';
+const accountIdentity = user => user ? `${user.uid}:${googleAccount(user)}` : '';
+const googleLogo = '<img class="google-logo" src="/google-icon.svg" width="40" height="40" alt="" aria-hidden="true">';
 let stopAdminLive = null;
 $('#confirm').addEventListener('close', () => { stopAdminLive?.(); stopAdminLive = null; });
 let stopRole = null;
@@ -83,29 +87,23 @@ function rememberName(name) {
   savedName = name;
   try { localStorage.setItem('spyfall-name', name); } catch {}
 }
-async function refreshProfile(user) {
-  const profile = await getDoc(doc(db, 'profiles', user.uid));
-  if (auth.currentUser?.uid !== user.uid) return;
-  ownProfile = profile.data() || null;
+async function refreshProfile(user, { forceGoogle = false } = {}) {
+  const expectedIdentity = accountIdentity(user);
+  const profile = googleAccount(user)
+    ? await syncGoogleProfile(db, user, { force: forceGoogle, code: state.code })
+    : (await getDoc(doc(db, 'profiles', user.uid))).data();
+  if (accountIdentity(auth.currentUser) !== expectedIdentity) return;
+  ownProfile = profile || null;
+  profileIdentity = accountIdentity(user);
   if (ownProfile) rememberName(ownProfile.name);
-  else if (googleAccount(user)) rememberName((user.displayName || 'Agent').trim().slice(0, 20));
+  else if (googleAccount(user)) rememberName(googleProfile(user).name);
 }
 function canChangeAccount() { return !state.room || state.room.status === 'lobby'; }
-function googleProfile(user) {
-  return { id: user.uid, name: (user.displayName || 'Agent').trim().slice(0, 20), avatarSeed: ownProfile?.avatarSeed || user.uid, avatarUrl: safeAvatarUrl(user.photoURL) };
-}
-async function completeGoogleSession(user, linked) {
+async function completeGoogleSession(user) {
   if (state.uid !== user.uid) { disconnect(); state.code = ''; history.replaceState(null, '', '/'); }
   state.uid = user.uid;
   startUsage(user.uid);
-  await refreshProfile(user);
-  if (linked || !ownProfile) {
-    const profile = googleProfile(user);
-    if (state.room?.status === 'lobby' && state.room.players.some(p => p.id !== user.uid && p.name.toLowerCase() === profile.name.toLowerCase())) profile.name = `${profile.name.slice(0, 15)} ${user.uid.slice(0, 4)}`;
-    await updateProfile(db, user.uid, profile);
-    if (state.room?.status === 'lobby') await action('rename', profile);
-    await refreshProfile(user);
-  }
+  await refreshProfile(user, { forceGoogle: true });
   render();
   trackUsage('google_signin');
 }
@@ -131,7 +129,7 @@ async function signInGoogle(source = 'account') {
           try {
             if (state.room) await action('leave');
             stopUsage(); disconnect(); state.code = ''; history.replaceState(null, '', '/');
-            await completeGoogleSession(await useGoogleAccount(result.credential), false);
+            await completeGoogleSession(await useGoogleAccount(result.credential));
             if (source !== 'home') showAccount();
             else notice('Google connected. Your profile is ready.');
           } finally { accountChanging = false; }
@@ -139,7 +137,7 @@ async function signInGoogle(source = 'account') {
       };
       return;
     }
-    await completeGoogleSession(result.user, result.linked);
+    await completeGoogleSession(result.user);
     if (source === 'profile') showProfileEditor();
     else if (source !== 'home') showAccount();
     else notice('Google connected. Your profile is ready.');
@@ -150,7 +148,7 @@ function showAccount() {
   if (adminAccount(auth.currentUser)) return showAdmin();
   concealRole();
   const user = auth.currentUser, connected = googleAccount(user), editable = canChangeAccount(), dialog = $('#confirm');
-  dialog.innerHTML = `<span class="eyebrow">YOUR ACCOUNT</span><h2>${connected ? 'Welcome back.' : 'Keep your identity.'}</h2><p>${connected ? `Signed in as ${esc(user.email)}. Your profile and saved locations follow your Google account.` : 'Guest play stays free and needs no account. Connect Google to keep your profile, scores, and saved locations across devices.'}</p>${connected ? `<button class="button secondary full" id="account-profile" ${!editable ? 'disabled' : ''}>Edit profile</button><button class="button quiet full" id="account-signout" ${!editable ? 'disabled' : ''}>Sign out</button>` : `<button class="button google-signin full" data-login-google ${!editable ? 'disabled' : ''}><span class="google-letter" aria-hidden="true">G</span> Continue with Google</button>`}${!editable ? '<p class="fineprint">Return to the lobby to change your account or profile.</p>' : ''}<button class="button quiet full" id="close-account">${connected ? 'Close' : 'Keep playing as guest'}</button>`;
+  dialog.innerHTML = `<span class="eyebrow">YOUR ACCOUNT</span><h2>${connected ? 'Welcome back.' : 'Keep your identity.'}</h2><p>${connected ? `Signed in as ${esc(user.email)}. Your profile and saved locations follow your Google account.` : 'Guest play stays free and needs no account. Connect Google to keep your profile, scores, and saved locations across devices.'}</p>${connected ? `<button class="button secondary full" id="account-profile" ${!editable ? 'disabled' : ''}>Edit profile</button><button class="button quiet full" id="account-signout" ${!editable ? 'disabled' : ''}>Sign out</button>` : `<button class="button google-signin full" data-login-google ${!editable ? 'disabled' : ''}>${googleLogo} Continue with Google</button>`}${!editable ? '<p class="fineprint">Return to the lobby to change your account or profile.</p>' : ''}<button class="button quiet full" id="close-account">${connected ? 'Close' : 'Keep playing as guest'}</button>`;
   if (!dialog.open) dialog.showModal();
   $('#close-account').onclick = () => dialog.close();
   $('[data-login-google]')?.addEventListener('click', () => signInGoogle());
@@ -208,7 +206,7 @@ function showProfileEditor() {
   if (!user) return showAccount();
   const dialog = $('#confirm'), player = state.room?.players.find(p => p.id === state.uid) || ownProfile || { id: user.uid, name: savedName || 'Agent' };
   let avatarSeed = player.avatarSeed || player.id, avatarUrl = player.avatarUrl || '';
-  dialog.innerHTML = `<form id="rename-form"><h2>Your agent profile</h2><div class="avatar-editor"><span class="avatar portrait" id="profile-avatar">${playerAvatar(player)}</span><button type="button" class="button secondary" id="regenerate-avatar">New avatar</button></div><label for="player-name">NAME</label><input id="player-name" maxlength="20" required autocomplete="nickname" value="${esc(player.name)}">${googleAccount(user) ? `<p class="account-identity">Connected to ${esc(user.email)}</p><button type="button" class="button outline full" id="use-google-profile">Use Google name & photo</button>` : '<button type="button" class="button google-signin full profile-google" data-login-google><span class="google-letter" aria-hidden="true">G</span> Connect Google</button><p class="fineprint">Use your Google name and photo, and keep your profile across devices.</p>'}<button class="button primary full name-save" type="submit">Save profile ${icon('check')}</button><button class="button quiet full" type="button" id="cancel-name">Cancel</button></form>`;
+  dialog.innerHTML = `<form id="rename-form"><h2>Your agent profile</h2><div class="avatar-editor"><span class="avatar portrait" id="profile-avatar">${playerAvatar(player)}</span><button type="button" class="button secondary" id="regenerate-avatar">New avatar</button></div><label for="player-name">NAME</label><input id="player-name" maxlength="20" required autocomplete="nickname" value="${esc(player.name)}">${googleAccount(user) ? `<p class="account-identity">Connected to ${esc(user.email)}</p><button type="button" class="button outline full" id="use-google-profile">Use Google name & photo</button>` : `<button type="button" class="button google-signin full profile-google" data-login-google>${googleLogo} Connect Google</button><p class="fineprint">Use your Google name and photo, and keep your profile across devices.</p>`}<button class="button primary full name-save" type="submit">Save profile ${icon('check')}</button><button class="button quiet full" type="button" id="cancel-name">Cancel</button></form>`;
   if (!dialog.open) dialog.showModal();
   $('#regenerate-avatar').onclick = () => { avatarSeed = crypto.randomUUID(); avatarUrl = ''; $('#profile-avatar').innerHTML = avatar(avatarSeed); };
   $('#use-google-profile')?.addEventListener('click', () => { const profile = googleProfile(user); avatarUrl = profile.avatarUrl; $('#player-name').value = profile.name; $('#profile-avatar').innerHTML = playerAvatar({ ...player, avatarSeed, avatarUrl }); });
@@ -275,7 +273,7 @@ function homeAccount() {
     const profile = ownProfile || googleProfile(user);
     return `<button class="input-account connected" type="button" data-action="rename" aria-label="Edit your Google profile" title="Connected with Google · Edit profile"><span class="avatar portrait">${playerAvatar(profile)}</span></button>`;
   }
-  return '<button class="input-account" type="button" data-action="google" aria-label="Continue with Google" title="Continue with Google"><span class="google-letter" aria-hidden="true">G</span></button>';
+  return `<button class="input-account" type="button" data-action="google" aria-label="Continue with Google" title="Continue with Google">${googleLogo}</button>`;
 }
 function home() {
   shell(`<section class="hero"><div class="eyebrow"><span class="dot"></span> SAME ROOM. SEPARATE PHONES.</div><h1>Good friends.<br><em>Great liars.</em></h1><p>One secret location. Spies in your midst.<br>Find out who’s hiding in plain sight.</p><div class="hero-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="agent agent-one">${icon('eye', 44)}</div><div class="agent agent-two">${icon('eye', 44)}</div><div class="agent agent-three">?</div><span class="art-note">trust no one.</span><span class="spark">✳</span></div><div class="facts"><span>${icon('users', 16)}2–15 players</span><span>${icon('clock', 16)}2–20 minutes</span><span>1–3 spies.</span></div></section><section class="panel entry"><label for="name">WHAT SHOULD WE CALL YOU?</label><div class="name-field"><input id="name" maxlength="20" autocomplete="nickname" placeholder="Your name" value="${esc(savedName)}">${homeAccount()}</div><button class="button primary" data-action="create">Create a room ${icon('plus')}</button><div class="divider"><span>or join your friends</span></div><form id="join-form"><label class="sr-only" for="code">Room code</label><div class="join-row"><input id="code" maxlength="6" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="ROOM CODE" value="${esc(state.code)}" required pattern="[A-Za-z2-9]{6}"><button class="button secondary" type="submit">Join ${icon('arrow')}</button></div></form><p class="fineprint">Got a QR code? Scan it with your phone’s camera.</p></section><button class="text-button leaderboard-link" data-action="scores">View overall leaderboard</button><section class="how"><div class="section-heading"><h2>A quick briefing</h2><span>01—03</span></div><div class="step"><span>01</span><div><h3>Get your secret</h3><p>Everyone learns the location. Except the spies.</p></div></div><div class="step"><span>02</span><div><h3>Ask. Answer. Act natural.</h3><p>Question each other out loud. Be specific enough to fit in, vague enough to keep the secret.</p></div></div><div class="step"><span>03</span><div><h3>Make your move</h3><p>Vote out the spy, or guess the location if you are one. Watch the clock.</p></div></div></section>`);
@@ -591,8 +589,12 @@ identity().then(async user => {
 }).catch(error => { state.loading = false; render(); notice(errorMessage(error)); });
 
 // A change in another tab must not leave the old player's room or secret visible.
-onAuthStateChanged(auth, user => {
-  if (!state.uid || accountChanging || state.uid === user?.uid) return;
+onIdTokenChanged(auth, user => {
+  if (!state.uid || accountChanging || profileIdentity === accountIdentity(user)) return;
+  if (state.uid === user?.uid) {
+    refreshProfile(user).then(() => { if ($('#rename-form')) showProfileEditor(); render(); }).catch(error => notice(errorMessage(error)));
+    return;
+  }
   stopUsage(); disconnect(); state.code = ''; state.uid = user?.uid || null;
   ownProfile = null; adminStats = null; rememberName('');
   $('#confirm').close(); history.replaceState(null, '', '/'); render();

@@ -76,6 +76,11 @@ service cloud.firestore {
           && request.resource.data.keys().hasOnly(['locations', 'updatedAt'])
           && request.resource.data.updatedAt == request.time
           && validSettings({'minutes':8, 'voting':'majority', 'spies':1, 'locations':request.resource.data.locations});
+        allow create, update: if signedIn() && uid() == id && key == 'identity'
+          && request.resource.data.keys().hasOnly(['googleProfileApplied', 'updatedAt'])
+          && request.resource.data.googleProfileApplied == true
+          && request.resource.data.updatedAt == request.time
+          && request.auth.token.firebase.get('identities', {}).keys().hasAny(['google.com']);
       }
       allow get: if signedIn();
       allow list: if admin() || signedIn() && request.query.limit <= 50;
