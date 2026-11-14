@@ -6,10 +6,11 @@ import { onIdTokenChanged } from 'firebase/auth';
 import { normalizeRoom, resolveResult, threshold, eligiblePlayers, requiredPlayers, MAX_PLAYERS, MAX_SPIES } from './game.js';
 import { membershipState, resetRoomView, lobbyReadiness } from './room-view.js';
 import { LOCATION_SETS, locationSetId } from './locations.js';
-import { unlockSound, toggleSound, soundEnabled, playSpyWin, playTimeout, playVote, playVotingSoon, SOUND_PREVIEWS, previewSound } from './sound.js';
+import { unlockSound, toggleSound, soundEnabled, playSpyWin, playSpyCaught, playTimeout, playVote, playVotingSoon, SOUND_PREVIEWS, previewSound } from './sound.js';
 import { avatar, playerAvatar } from './avatars.js';
 import { QUESTION_IDEAS } from './questions.js';
 import { clockCue } from './round-clock.js';
+import { caughtSpyCue, resultCue } from './round-cues.js';
 import { bindDialogViewport } from './dialog.js';
 import { settleRound, saveProfile, updateProfile } from './scores.js';
 import { auth, db, identity, callGame } from './firebase.js';
@@ -43,6 +44,7 @@ let lastVotes = {};
 let focusPlayers = false;
 let questionIndex = 0;
 let confirmedVotes = null, voteSoundRound = null;
+let confirmedRoom = null;
 let clockRound = null, previousSeconds = null;
 const settlements = new Map();
 function saveScores() {
@@ -391,7 +393,7 @@ function render() {
   else ended();
 }
 function inviteUrl() { const url = new URL(location.origin); url.searchParams.set('room', state.code); return url.href; }
-function disconnect() { clockRound = null; previousSeconds = null; confirmedVotes = null; voteSoundRound = null; connectionVersion++; state.stops.forEach(stop => stop()); state.stops = []; stopRole?.(); stopRole = null; resetRoomView(state); }
+function disconnect() { clockRound = null; previousSeconds = null; confirmedVotes = null; voteSoundRound = null; confirmedRoom = null; connectionVersion++; state.stops.forEach(stop => stop()); state.stops = []; stopRole?.(); stopRole = null; resetRoomView(state); }
 async function loadResult() {
   const roundId = state.room?.roundId, code = state.code;
   try {
@@ -400,7 +402,9 @@ async function loadResult() {
       state.room.result = resolveResult(state.room.result, secret);
       if (pendingWinSound === `${code}:${roundId}`) {
         pendingWinSound = null;
-        if (state.room.result.reason === 'guess' && state.room.result.winner === 'spy') playSpyWin();
+        const cue = resultCue(state.room.result);
+        if (cue === 'spy-caught') playSpyCaught();
+        else if (cue === 'spy-win') playSpyWin();
         else playTimeout();
       }
       render();
@@ -428,10 +432,14 @@ async function connect(code) {
         const key = `${code}:${next.roundId}`;
         if (voteSoundRound === key && confirmedVotes && Object.entries(next.votes).some(([id, target]) => target !== confirmedVotes[id])) playVote();
         confirmedVotes = { ...next.votes }; voteSoundRound = key;
+        if (caughtSpyCue(confirmedRoom, next)) {
+          playSpyCaught();
+          notice('A spy was caught. Votes reset—keep looking for the others.');
+        }
+        confirmedRoom = next;
       }
       if (next.status === 'lobby' && inRound(state.room)) notice('Round stopped. You’re back in the lobby.');
       if (next.status === 'ended' && inRound(state.room) && next.roundId === state.room.roundId) pendingWinSound = `${code}:${next.roundId}`;
-      if (next.caughtIds.length > (state.room?.caughtIds.length || 0)) notice('A spy was caught. Votes reset—keep looking for the others.');
       if (next.roundId !== state.room?.roundId || next.status !== state.room?.status) { state.reveal = false; $('#confirm').close(); }
       state.room = next; state.loading = false; render();
       if (inRound(next) && !stopRole) stopRole = onSnapshot(doc(db, 'rooms', code, 'roles', state.uid), roleSnap => { state.role = roleSnap.exists() ? roleSnap.data() : null; if (inRound(state.room)) render(); }, async error => {

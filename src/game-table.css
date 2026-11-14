@@ -315,6 +315,7 @@ dialog:has(#admin-content) { max-width: 500px; }
 .admin-sounds h3 { font-size: 14px; margin: 0 0 12px; }
 .sound-test-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .sound-test-grid .button { padding: 10px; min-height: 48px; font-size: 12px; line-height: 1.4; }
+.sound-test-grid .button:last-child:nth-child(odd) { grid-column: 1 / -1; }
 .admin-room { display: grid; grid-template-columns: 1fr auto; gap: 3px 10px; padding: 12px 0; border-bottom: 1px solid var(--line); }
 .admin-room strong { font-size: 12px; letter-spacing: 1px; }
 .admin-room span { font-size: 11px; color: var(--muted); }

@@ -1,14 +1,15 @@
 let context;
-let cueBuffer, loadingCue, playingCue;
+let playingCue;
 let cueGeneration = 0;
-const cueUrl = new URL('./assets/spy-chord.mp3', import.meta.url).href;
-function preloadCue() {
-  if (cueBuffer) return Promise.resolve(cueBuffer);
-  if (!loadingCue) loadingCue = fetch(cueUrl).then(response => {
+const spyWin = { url: new URL('./assets/spy-chord.mp3', import.meta.url).href };
+const spyCaught = { url: new URL('./assets/spy-caught.mp3', import.meta.url).href };
+function preloadCue(cue) {
+  if (cue.buffer) return Promise.resolve(cue.buffer);
+  if (!cue.loading) cue.loading = fetch(cue.url).then(response => {
     if (!response.ok) throw new Error('Sound unavailable');
     return response.arrayBuffer();
-  }).then(bytes => context.decodeAudioData(bytes)).then(buffer => (cueBuffer = buffer)).catch(() => null).finally(() => { loadingCue = null; });
-  return loadingCue;
+  }).then(bytes => context.decodeAudioData(bytes)).then(buffer => (cue.buffer = buffer)).catch(() => null).finally(() => { cue.loading = null; });
+  return cue.loading;
 }
 function stopCue() { cueGeneration++; playingCue?.stop(); playingCue = null; }
 if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => { if (document.hidden) stopCue(); });
@@ -21,7 +22,8 @@ export async function unlockSound() {
     const Audio = window.AudioContext || window.webkitAudioContext;
     if (!Audio) return false;
     context ||= new Audio();
-    void preloadCue();
+    void preloadCue(spyWin);
+    void preloadCue(spyCaught);
     if (context.state === 'suspended') await context.resume();
     return context.state === 'running';
   } catch { return false; /* Game play continues when audio is unavailable. */ }
@@ -32,11 +34,13 @@ export function toggleSound() {
   if (enabled) unlockSound(); else stopCue();
   return enabled;
 }
-export async function playSpyWin() {
+export const playSpyWin = () => playRecording(spyWin);
+export const playSpyCaught = () => playRecording(spyCaught);
+async function playRecording(cue) {
   if (!enabled || document.hidden || !context || context.state !== 'running') return false;
   stopCue();
   const generation = cueGeneration;
-  const buffer = cueBuffer || await Promise.race([preloadCue(), new Promise(resolve => setTimeout(() => resolve(null), 1200))]);
+  const buffer = cue.buffer || await Promise.race([preloadCue(cue), new Promise(resolve => setTimeout(() => resolve(null), 1200))]);
   if (!buffer || generation !== cueGeneration || !enabled || document.hidden || context.state !== 'running') return false;
   const source = context.createBufferSource();
   source.buffer = buffer;
@@ -89,6 +93,7 @@ export function playVotingSoon() {
 
 export const SOUND_PREVIEWS = [
   { id: 'spy-win', label: 'Correct spy guess', play: playSpyWin },
+  { id: 'spy-caught', label: 'Spy caught', play: playSpyCaught },
   { id: 'vote', label: 'Vote cast', play: playVote },
   { id: 'voting-soon', label: 'One minute left', play: playVotingSoon },
   { id: 'round-end', label: 'Time up / round end', play: playTimeout }

@@ -5,13 +5,14 @@ test('all admin previews unlock audio on the first gesture and respect mute and 
   const keys = ['window', 'document', 'localStorage', 'fetch'];
   const previous = Object.fromEntries(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   let started = 0, resumed = 0;
+  const recordings = [];
   const storage = new Map();
   const parameter = { setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} };
-  const source = () => ({ connect() {}, disconnect() {}, start() { started++; }, stop() {}, frequency: { ...parameter } });
+  const source = () => ({ connect() {}, disconnect() {}, start() { started++; if (this.buffer) recordings.push(this.buffer.asset); }, stop() {}, frequency: { ...parameter } });
   class AudioContext {
     state = 'suspended'; currentTime = 0; destination = {};
     async resume() { resumed++; this.state = 'running'; }
-    async decodeAudioData() { return {}; }
+    async decodeAudioData(bytes) { return { asset: new TextDecoder().decode(bytes) }; }
     createBufferSource() { return source(); }
     createOscillator() { return source(); }
     createGain() { return { connect() {}, disconnect() {}, gain: { ...parameter } }; }
@@ -20,24 +21,28 @@ test('all admin previews unlock audio on the first gesture and respect mute and 
     globalThis.window = { AudioContext };
     globalThis.document = { hidden: false, addEventListener() {} };
     globalThis.localStorage = { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value) };
-    globalThis.fetch = async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) });
+    globalThis.fetch = async url => ({ ok: true, arrayBuffer: async () => new TextEncoder().encode(url).buffer });
     const sound = await import('../../src/sound.js');
-    assert.equal(sound.SOUND_PREVIEWS.length, 4);
+    assert.deepEqual(sound.SOUND_PREVIEWS.map(cue => cue.id), ['spy-win', 'spy-caught', 'vote', 'voting-soon', 'round-end']);
     for (const cue of sound.SOUND_PREVIEWS) {
       const before = started;
       assert.equal(await sound.previewSound(cue.id), true);
       assert.ok(started > before, `${cue.label} must start audio`);
     }
     assert.equal(resumed, 1);
+    assert.ok(recordings[0].endsWith('/spy-chord.mp3'));
+    assert.ok(recordings[1].endsWith('/spy-caught.mp3'), 'a caught spy uses its own recording');
     assert.equal(storage.size, 0, 'previewing must not change the saved sound preference');
     sound.toggleSound();
     const before = started;
     assert.equal(await sound.previewSound('vote'), false);
+    assert.equal(await sound.previewSound('spy-caught'), false);
     assert.equal(started, before);
     assert.equal(sound.soundEnabled(), false);
     sound.toggleSound();
     document.hidden = true;
     assert.equal(await sound.previewSound('spy-win'), false);
+    assert.equal(await sound.previewSound('spy-caught'), false);
     assert.equal(started, before);
     document.hidden = false;
     assert.equal(await sound.previewSound('unknown'), false);
