@@ -147,10 +147,13 @@ async function signInGoogle(source = 'account') {
   } catch (error) { notice(error.code?.startsWith('auth/') ? accountError(error) : errorMessage(error)); if (source !== 'home') showAccount(); }
   finally { accountChanging = false; state.busy = false; render(); $('#confirm').querySelectorAll('button').forEach(button => { button.disabled = false; }); }
 }
-function showAccount() {
-  if (adminAccount(auth.currentUser)) return showAdmin();
+async function showAccount(checkAdmin = true) {
+  const user = auth.currentUser;
+  const allowed = checkAdmin && await adminAccount(user, true);
+  if (auth.currentUser !== user) return;
+  if (allowed) return showAdmin();
   concealRole();
-  const user = auth.currentUser, connected = googleAccount(user), editable = canChangeAccount(), dialog = $('#confirm');
+  const connected = googleAccount(user), editable = canChangeAccount(), dialog = $('#confirm');
   dialog.innerHTML = `<span class="eyebrow">YOUR ACCOUNT</span><h2>${connected ? 'Welcome back.' : 'Keep your identity.'}</h2><p>${connected ? `Signed in as ${esc(user.email)}. Your profile and saved locations follow your Google account.` : 'Guest play stays free and needs no account. Connect Google to keep your profile, scores, and saved locations across devices.'}</p>${connected ? `<button class="button secondary full" id="account-profile" ${!editable ? 'disabled' : ''}>Edit profile</button><button class="button quiet full" id="account-signout" ${!editable ? 'disabled' : ''}>Sign out</button>` : `<button class="button google-signin full" data-login-google ${!editable ? 'disabled' : ''}>${googleLogo} Continue with Google</button>`}${!editable ? '<p class="fineprint">Return to the lobby to change your account or profile.</p>' : ''}<button class="button quiet full" id="close-account">${connected ? 'Close' : 'Keep playing as guest'}</button>`;
   if (!dialog.open) dialog.showModal();
   $('#close-account').onclick = () => dialog.close();
@@ -172,9 +175,12 @@ function signOutAccount() {
   });
 }
 async function showAdmin(force = false) {
-  if (!adminAccount(auth.currentUser)) return showAccount();
+  const user = auth.currentUser;
+  const allowed = await adminAccount(user, force);
+  if (auth.currentUser !== user) return;
+  if (!allowed) { stopAdminLive?.(); stopAdminLive = null; adminStats = null; return showAccount(false); }
   concealRole();
-  const dialog = $('#confirm'), user = auth.currentUser;
+  const dialog = $('#confirm');
   stopAdminLive?.();
   dialog.innerHTML = `<div class="section-heading"><span class="eyebrow">ADMIN AREA</span><button class="text-button" id="refresh-admin">Refresh</button></div><h2>The whole game.</h2><div id="admin-live" class="admin-live" aria-live="polite">Connecting to live activity…</div><p class="fineprint">Live means a visible app checked in during the last 3 minutes. Multiple tabs count as one player.</p><section class="admin-sounds" aria-labelledby="sound-tests-heading"><h3 id="sound-tests-heading">Sound check</h3><div class="sound-test-grid">${SOUND_PREVIEWS.map(cue => `<button type="button" class="button outline" data-preview-sound="${cue.id}">${cue.label}</button>`).join('')}</div><p class="fineprint" id="sound-preview-status" role="status">Preview sounds on this device.</p></section><div id="admin-content" aria-live="polite"><p>Loading game stats…</p></div><button class="button primary full" id="close-admin">Back to game</button><button class="button quiet full" id="admin-signout">Sign out</button>`;
   if (!dialog.open) dialog.showModal();
@@ -269,7 +275,7 @@ function shell(content) {
   const usageView = state.room ? (inRound(state.room) ? 'round' : state.room.status === 'ended' ? 'result' : 'lobby') : state.loading ? 'loading' : 'home';
   usageScreen(usageView, state.room ? state.code : '');
   if (entered) trackUsage('screen_view', { screen: usageView, roundId: state.room?.roundId || 0 });
-  $('#app').innerHTML = `<div class="shell game-table">${header()}<main class="${entered ? 'screen-enter' : ''}">${content}</main><footer><button type="button" class="footer-credit" data-action="account" aria-label="${adminAccount(auth.currentUser) ? 'Open admin area' : 'Open account and sign in'}">made with <span class="footer-heart" role="img" aria-label="love">♥</span> by vonUbisch</button></footer></div>`;
+  $('#app').innerHTML = `<div class="shell game-table">${header()}<main class="${entered ? 'screen-enter' : ''}">${content}</main><footer><button type="button" class="footer-credit" data-action="account" aria-label="Open account">made with <span class="footer-heart" role="img" aria-label="love">♥</span> by vonUbisch</button></footer></div>`;
   document.querySelectorAll('[data-player-id]').forEach((row, index) => {
     if (entered || !lastPlayerIds.includes(row.dataset.playerId)) { row.classList.add('player-enter'); row.style.setProperty('--arrival', `${Math.min(index, 5) * 45}ms`); }
     if (!entered && row.dataset.vote !== lastVotes[row.dataset.playerId]) row.querySelector('.player-meta')?.classList.add('vote-updated');

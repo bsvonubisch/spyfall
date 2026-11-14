@@ -1,9 +1,7 @@
 import { GoogleAuthProvider, linkWithPopup, signInWithPopup, signInWithCredential, signOut } from 'firebase/auth';
 import { auth, identity } from './firebase.js';
 
-export const ADMIN_EMAIL = 'owner@example.com';
-export const googleAccount = user => Boolean(user && !user.isAnonymous && user.providerData.some(provider => provider.providerId === 'google.com'));
-export const adminAccount = user => googleAccount(user) && user.emailVerified && user.email?.toLowerCase() === ADMIN_EMAIL;
+export { googleAccount, adminAccount } from './admin-access.js';
 
 // Open the popup directly from the click, before any asynchronous work.
 export async function connectGoogle() {

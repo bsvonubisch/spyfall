@@ -29,7 +29,7 @@ async function start(code) {
   return { room, roles, spy: roles.find(r => r.isSpy), civilian: roles.find(r => !r.isSpy) };
 }
 
-const ownerClaims = { email: 'owner@example.com', email_verified: true, firebase: { sign_in_provider: 'google.com', identities: { 'google.com': ['owner-google-id'] } } };
+const ownerClaims = { admin: true, email: 'owner@example.com', email_verified: true, firebase: { sign_in_provider: 'google.com', identities: { 'google.com': ['owner-google-id'] } } };
 const ownerDb = () => env.authenticatedContext('owner', ownerClaims).firestore();
 const usageEvent = (uid = 'p0') => ({ uid, type: 'visit', sessionId: crypto.randomUUID(), screen: 'home', roomCode: '', roundId: 0, device: 'mobile', source: 'client', createdAt: serverTimestamp() });
 
@@ -78,13 +78,16 @@ test('linking a Google identity retains the guest UID, profile, and saved locati
 });
 
 
-test('only the verified Google owner can query admin data, without access to private active roles', async () => {
+test('only a verified Google account with an admin claim can query admin data, without access to private active roles', async () => {
   const code = await lobby(2); const { spy } = await start(code);
-  for (const claims of [{}, { ...ownerClaims, email_verified: false }, { ...ownerClaims, email: 'other@example.com' }, { ...ownerClaims, firebase: { sign_in_provider: 'anonymous', identities: {} } }]) {
+  for (const claims of [{}, { ...ownerClaims, email_verified: false }, { ...ownerClaims, admin: false }, { ...ownerClaims, admin: 'true' }, { ...ownerClaims, admin: undefined }, { ...ownerClaims, firebase: { sign_in_provider: 'anonymous', identities: {} } }]) {
     const outsider = env.authenticatedContext('outsider', claims).firestore();
     for (const path of ['profiles', 'rooms', 'results', 'usage', 'presence']) await assertFails(getDocs(collection(outsider, path)));
   }
   const admin = ownerDb();
+  // The email is not an authorization rule; only a privileged service can assign the claim.
+  const renamed = env.authenticatedContext('renamed-admin', { ...ownerClaims, email: 'changed@example.com' }).firestore();
+  await assertSucceeds(getDocs(collection(renamed, 'rooms')));
   for (const path of ['profiles', 'rooms', 'results', 'usage', 'presence']) await assertSucceeds(getDocs(collection(admin, path)));
   await assertFails(getDoc(doc(admin, 'rooms', code, 'roles', spy.id)));
   await assertFails(getDoc(doc(admin, 'rooms', code, 'secrets', 'current')));

@@ -70,7 +70,13 @@ Spark has usage limits. Exceeding a free quota can interrupt the game until it r
 
 ## Owner analytics and saved preferences
 
-Click the plain “made with ♥ by vonUbisch” footer credit to connect an account. The verified Google account **owner@example.com** opens the admin area instead. Firestore rules check the verified email and Google provider identity; hiding the entry is not the security boundary. Admin access does not reveal other players’ active private role documents or the secret answer.
+Click the plain “made with ♥ by vonUbisch” footer credit to connect an account. A verified Google account with the Firebase Authentication custom claim **`admin: true`** opens the admin area instead. Firestore rules check the signed admin claim, verified email, and Google provider identity; hiding the entry is not the security boundary. Admin access does not reveal other players’ active private role documents or the secret answer.
+
+Keep the owner address in the **`ADMIN_EMAIL` repository secret**, never in a `VITE_` variable or browser bundle. The secret is private configuration for trusted maintenance; changing it alone does not grant or revoke access. No email allowlist is shipped with the app.
+
+To provision the owner, sign in with the Firebase CLI and provide `ADMIN_EMAIL` only in the maintenance process environment. Run `node scripts/set-admin.mjs` to check the target, then `node scripts/set-admin.mjs --apply` to assign the claim. The script requires an existing, verified Google user, preserves other claims, and verifies the saved result without printing the email or tokens. Use `--revoke --apply` to remove that account’s admin claim. `FIREBASE_PROJECT_ID` optionally overrides the project. Opening the footer refreshes the token; Firestore enforces authorization even if someone modifies the browser UI. This runs with the owner’s existing CLI login and introduces no Cloud Functions.
+
+The repository history has also been rewritten to remove the former owner email from files, commit messages, and author metadata. Re-clone old checkouts before contributing; independently saved clones and GitHub caches are outside this cleanup.
 
 - The overview shows profile totals, completed rounds, recent rooms, most active players, daily activity, and usage totals. It loads on demand using Firestore count queries; Refresh updates the snapshot.
 - **Sound check** previews all five cues: a correct spy guess, a caught spy, a vote, the final minute, and time up/round end. Previews play on the admin's device, respect its Sound setting, and do not change a game or create usage events.
