@@ -318,14 +318,30 @@ function rules() {
     <p class="fineprint">Everyone can see this list. Only non-spies see the chosen location. Save your changes before starting. This list is saved to your profile for future rooms.</p><button class="button secondary full" type="submit">Save rules ${icon('check')}</button>
   </form>` : `<dl class="rule-summary"><div><dt>Round length</dt><dd>${r.settings.minutes} minutes</dd></div><div><dt>Spies</dt><dd>${r.settings.spies}</dd></div><div><dt>Voting</dt><dd>${r.settings.voting === 'majority' ? 'Majority' : 'All except accused'}</dd></div></dl><div class="location-chips">${r.settings.locations.map(l => `<span>${esc(l)}</span>`).join('')}</div>`}</section>`;
 }
+function lobbySettings() {
+  return state.room.hostId === state.uid ? state.draft || state.room.settings : state.room.settings;
+}
+function updateLobbyReadiness() {
+  if (state.room?.status !== 'lobby') return;
+  const spies = lobbySettings().spies, needed = requiredPlayers(spies) - state.room.players.length;
+  const waiting = $('#lobby-waiting');
+  if (waiting) {
+    waiting.hidden = needed <= 0;
+    waiting.textContent = needed > 0 ? `Waiting for ${needed} more ${needed === 1 ? 'player' : 'players'} for ${spyLabel(spies)}…` : '';
+  }
+  const start = $('[data-action="start"]');
+  if (start) start.disabled = state.busy || needed > 0;
+}
 function lobby() {
   const r = state.room, host = r.hostId === state.uid;
-  const minimum = requiredPlayers(r.settings.spies), needed = minimum - r.players.length;
+  const settings = lobbySettings();
   shell(`<div class="lobby-intro"><span class="eyebrow">THE LOBBY</span><h1>The usual suspects.</h1><p>${host ? 'Scan the code. Take your place.' : 'You’re in. Your host will start the round.'}<br>Best played with 4 or more people.</p></div>
     <section class="invite panel" aria-label="Invite friends"><div><label>INVITE YOUR FRIENDS</label><strong class="room-code">${esc(state.code)}</strong><button class="text-button" data-action="share">${icon('copy', 16)} Copy invite link</button></div><canvas id="qr" aria-label="Scan to join this room" role="img"></canvas></section>
     <div class="tabs lobby-tabs" role="tablist" aria-label="Lobby sections"><button role="tab" aria-selected="${state.tab === 'players'}" data-action="players">Players <span>${r.players.length}/${MAX_PLAYERS}</span></button><button role="tab" aria-selected="${state.tab === 'rules'}" data-action="rules">Game rules ${icon('clock', 16)}</button></div>
-    ${state.tab === 'players' ? `<section class="roster player-grid lobby-roster" aria-label="Players">${playerList()}</section>${needed > 0 ? `<p class="waiting">Waiting for ${needed} more ${needed === 1 ? 'player' : 'players'} for ${spyLabel(r.settings.spies)}…</p>` : ''}<div class="round-summary">${icon('clock', 16)} ${r.settings.minutes} min <span>·</span> ${r.settings.locations.length} locations <span>·</span> ${spyLabel(r.settings.spies)}</div>` : rules()}
-    <div class="bottom-action">${host ? `<button class="button primary full" data-action="start" ${needed > 0 ? 'disabled' : ''}>Start the game ${icon('arrow')}</button>` : `<div class="waiting-host"><span class="pulse"></span> Waiting for the host to start</div>`}</div><button class="text-button leaderboard-link" data-action="scores">Leaderboards</button>`);
+    ${state.tab === 'players' ? `<section class="roster player-grid lobby-roster" aria-label="Players">${playerList()}</section><div class="round-summary">${icon('clock', 16)} ${settings.minutes} min <span>·</span> ${settings.locations.length} locations <span>·</span> ${spyLabel(settings.spies)}${host && state.draft ? '<span>· Unsaved changes</span>' : ''}</div>` : rules()}
+    <p class="waiting" id="lobby-waiting" aria-live="polite" hidden></p>
+    <div class="bottom-action">${host ? `<button class="button primary full" data-action="start" disabled>Start the game ${icon('arrow')}</button>` : `<div class="waiting-host"><span class="pulse"></span> Waiting for the host to start</div>`}</div><button class="text-button leaderboard-link" data-action="scores">Leaderboards</button>`);
+  updateLobbyReadiness();
   QRCode.toCanvas($('#qr'), inviteUrl(), { width: 256, margin: 4, color: { dark: '#10213c', light: '#ffffff' } }).catch(() => notice('QR code unavailable. You can still share the invite link.'));
 }
 function active() {
@@ -491,6 +507,7 @@ window.addEventListener('blur', concealRole);
 document.addEventListener('pointerdown', unlockSound, { passive: true });
 document.addEventListener('keydown', unlockSound);
 $('#app').addEventListener('change', event => {
+  if (event.target.id === 'spies') { state.draft = readRulesForm(); updateLobbyReadiness(); return; }
   if (event.target.id !== 'location-set') return;
   const selected = LOCATION_SETS.find(set => set.id === event.target.value);
   if (!selected) return;
@@ -506,6 +523,7 @@ $('#app').addEventListener('input', event => {
     $('#minutes-label').textContent = `${state.draft.minutes} min`;
     $('#minutes').style.setProperty('--range-progress', `${(state.draft.minutes - 2) / 18 * 100}%`);
     $('#minutes').setAttribute('aria-valuetext', `${state.draft.minutes} minutes`);
+    updateLobbyReadiness();
   }
 });
 $('#app').addEventListener('submit', event => {
