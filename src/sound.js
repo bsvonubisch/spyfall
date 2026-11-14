@@ -15,15 +15,16 @@ if (typeof document !== 'undefined') document.addEventListener('visibilitychange
 let enabled = true;
 try { enabled = localStorage.getItem('spyfall-sound') !== 'off'; } catch {}
 export function soundEnabled() { return enabled; }
-export function unlockSound() {
-  if (!enabled) return;
+export async function unlockSound() {
+  if (!enabled) return false;
   try {
     const Audio = window.AudioContext || window.webkitAudioContext;
-    if (!Audio) return;
+    if (!Audio) return false;
     context ||= new Audio();
     void preloadCue();
-    if (context.state === 'suspended') context.resume().catch(() => {});
-  } catch { /* Game play continues when audio is unavailable. */ }
+    if (context.state === 'suspended') await context.resume();
+    return context.state === 'running';
+  } catch { return false; /* Game play continues when audio is unavailable. */ }
 }
 export function toggleSound() {
   enabled = !enabled;
@@ -32,17 +33,18 @@ export function toggleSound() {
   return enabled;
 }
 export async function playSpyWin() {
-  if (!enabled || document.hidden || !context || context.state !== 'running') return;
+  if (!enabled || document.hidden || !context || context.state !== 'running') return false;
   stopCue();
   const generation = cueGeneration;
   const buffer = cueBuffer || await Promise.race([preloadCue(), new Promise(resolve => setTimeout(() => resolve(null), 1200))]);
-  if (!buffer || generation !== cueGeneration || !enabled || document.hidden || context.state !== 'running') return;
+  if (!buffer || generation !== cueGeneration || !enabled || document.hidden || context.state !== 'running') return false;
   const source = context.createBufferSource();
   source.buffer = buffer;
   source.connect(context.destination);
   playingCue = source;
   source.onended = () => { source.disconnect(); if (playingCue === source) playingCue = null; };
   source.start();
+  return true;
 }
 export function playTimeout() {
   if (!enabled || document.hidden || !context || context.state !== 'running') return;
@@ -83,4 +85,18 @@ export function playVotingSoon() {
     tone.connect(gain); gain.connect(context.destination); tone.start(at); tone.stop(at + 0.42);
     tone.onended = () => { tone.disconnect(); gain.disconnect(); };
   });
+}
+
+export const SOUND_PREVIEWS = [
+  { id: 'spy-win', label: 'Correct spy guess', play: playSpyWin },
+  { id: 'vote', label: 'Vote cast', play: playVote },
+  { id: 'voting-soon', label: 'One minute left', play: playVotingSoon },
+  { id: 'round-end', label: 'Time up / round end', play: playTimeout }
+];
+
+export async function previewSound(id) {
+  const cue = SOUND_PREVIEWS.find(cue => cue.id === id);
+  if (!cue || document.hidden || !await unlockSound()) return false;
+  stopCue();
+  return (await cue.play()) !== false;
 }

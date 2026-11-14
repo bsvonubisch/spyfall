@@ -18,7 +18,7 @@ service cloud.firestore {
     function spies(s) { return s.get('spyIds', [s.get('spyId', '')]); }
     function spyCount(r) { return r.settings.get('spies', 1); }
     function archived(r) { return r.status != 'ended' || !('roundKey' in r) || exists(/databases/$(database)/documents/results/$(r.roundKey)); }
-    function validName(n) { return n is string && n.size() >= 1 && n.size() <= 20; }
+    function validName(n) { return n is string && n.size() >= 1 && n.size() <= 20 && n == n.trim(); }
     function validAvatar(s, id) { return s.get('avatarSeed',id) is string && s.get('avatarSeed',id).size() >= 1 && s.get('avatarSeed',id).size() <= 64; }
     function validPhoto(s) {
       let url = s.get('avatarUrl', '');
@@ -120,13 +120,22 @@ service cloud.firestore {
       return old.status in ['active','accusing','ended'] && (host(old) || (member(old) && !(uid() in after(code).memberIds)))
         && (!existsAfter(/databases/$(database)/documents/rooms/$(code)) || after(code).status == 'lobby');
     }
+    // Validate every entry without exceeding the rules expression budget.
+    // Round-tripping rejects non-strings and embedded line breaks; the pattern
+    // bounds each trimmed name, and the set check ignores letter case.
+    function validLocations(l) {
+      let names = l.join('\n');
+      let name = '[^\\s]([^\\r\\n\\t]{0,38}[^\\s])?';
+      return l is list && l.size() >= 3 && l.size() <= 40
+        && names.split('\n') == l && names.matches(name + '(\n' + name + '){2,39}')
+        && names.lower().split('\n').toSet().size() == l.size();
+    }
     function validSettings(s) {
       return s.keys().hasOnly(['minutes', 'voting', 'spies', 'locations'])
         && s.minutes is int && s.minutes >= 2 && s.minutes <= 20
         && s.voting in ['majority', 'unanimous']
         && s.get('spies', 1) is int && s.get('spies', 1) >= 1 && s.get('spies', 1) <= 3
-        && s.locations is list && s.locations.size() >= 3 && s.locations.size() <= 40
-        && s.locations.toSet().size() == s.locations.size();
+        && validLocations(s.locations);
     }
 
     function voteAt(r, i, target) { return r.memberIds.size() > i && r.votes.get(r.memberIds[i], '') == target ? 1 : 0; }

@@ -4,9 +4,9 @@ import QRCode from 'qrcode';
 import { doc, onSnapshot, getDoc, getDocs, collection, query, orderBy, limit } from 'firebase/firestore';
 import { onIdTokenChanged } from 'firebase/auth';
 import { normalizeRoom, resolveResult, threshold, eligiblePlayers, requiredPlayers, MAX_PLAYERS, MAX_SPIES } from './game.js';
-import { membershipState } from './room-view.js';
+import { membershipState, resetRoomView, lobbyReadiness } from './room-view.js';
 import { LOCATION_SETS, locationSetId } from './locations.js';
-import { unlockSound, toggleSound, soundEnabled, playSpyWin, playTimeout, playVote, playVotingSoon } from './sound.js';
+import { unlockSound, toggleSound, soundEnabled, playSpyWin, playTimeout, playVote, playVotingSoon, SOUND_PREVIEWS, previewSound } from './sound.js';
 import { avatar, playerAvatar } from './avatars.js';
 import { QUESTION_IDEAS } from './questions.js';
 import { clockCue } from './round-clock.js';
@@ -22,7 +22,8 @@ const $ = selector => document.querySelector(selector);
 bindDialogViewport($('#confirm'));
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const icon = (name, size = 20) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${({eye:'<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',arrow:'<path d="M4 12h16m-6-6 6 6-6 6"/>',plus:'<path d="M12 5v14M5 12h14"/>',users:'<circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2m1-15a3 3 0 0 1 0 6m2 3a5 5 0 0 1 3 4v2"/>',clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',lock:'<rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',check:'<path d="m5 12 4 4L19 6"/>',copy:'<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/>',pin:'<path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 0 1 14 0Z"/><circle cx="12" cy="10" r="2"/>',exit:'<path d="M9 4H4v16h5m5-12 4 4-4 4m-5-4h11"/>'})[name] || ''}</svg>`;
-const state = { code: new URLSearchParams(location.search).get('room')?.toUpperCase() || '', room: null, role: null, uid: null, tab: 'players', reveal: false, busy: false, loading: false, draft: null, stops: [], clockOffset: 0 };
+const initialRoomCode = new URLSearchParams(location.search).get('room')?.toUpperCase() || '';
+const state = { code: initialRoomCode, room: null, role: null, uid: null, tab: 'players', reveal: false, busy: false, loading: false, draft: null, stops: [], clockOffset: 0 };
 let savedName = '';
 let ownProfile = null, accountChanging = false, adminStats = null;
 let profileIdentity = '';
@@ -173,13 +174,24 @@ async function showAdmin(force = false) {
   concealRole();
   const dialog = $('#confirm'), user = auth.currentUser;
   stopAdminLive?.();
-  dialog.innerHTML = '<div class="section-heading"><span class="eyebrow">ADMIN AREA</span><button class="text-button" id="refresh-admin">Refresh</button></div><h2>The whole game.</h2><div id="admin-live" class="admin-live" aria-live="polite">Connecting to live activity…</div><p class="fineprint">Live means a visible app checked in during the last 3 minutes. Multiple tabs count as one player.</p><div id="admin-content" aria-live="polite"><p>Loading game stats…</p></div><button class="button primary full" id="close-admin">Back to game</button><button class="button quiet full" id="admin-signout">Sign out</button>';
+  dialog.innerHTML = `<div class="section-heading"><span class="eyebrow">ADMIN AREA</span><button class="text-button" id="refresh-admin">Refresh</button></div><h2>The whole game.</h2><div id="admin-live" class="admin-live" aria-live="polite">Connecting to live activity…</div><p class="fineprint">Live means a visible app checked in during the last 3 minutes. Multiple tabs count as one player.</p><section class="admin-sounds" aria-labelledby="sound-tests-heading"><h3 id="sound-tests-heading">Sound check</h3><div class="sound-test-grid">${SOUND_PREVIEWS.map(cue => `<button type="button" class="button outline" data-preview-sound="${cue.id}">${cue.label}</button>`).join('')}</div><p class="fineprint" id="sound-preview-status" role="status">Preview sounds on this device.</p></section><div id="admin-content" aria-live="polite"><p>Loading game stats…</p></div><button class="button primary full" id="close-admin">Back to game</button><button class="button quiet full" id="admin-signout">Sign out</button>`;
   if (!dialog.open) dialog.showModal();
   const content = $('#admin-content');
   $('#close-admin').onclick = () => dialog.close();
   $('#refresh-admin').onclick = () => showAdmin(true);
   $('#admin-signout').onclick = signOutAccount;
   $('#admin-signout').disabled = !canChangeAccount();
+  dialog.querySelectorAll('[data-preview-sound]').forEach(button => {
+    button.onclick = async () => {
+      const status = $('#sound-preview-status');
+      button.disabled = true;
+      try {
+        const played = await previewSound(button.dataset.previewSound);
+        status.textContent = played ? `Playing: ${button.textContent}.` : soundEnabled() ? 'Audio is unavailable in this browser.' : 'Turn on Sound in the navigation to preview.';
+      } catch { status.textContent = 'Could not play this sound. Please try again.'; }
+      finally { button.disabled = false; }
+    };
+  });
   stopAdminLive = watchLiveStats(db, live => {
     if (!dialog.open || !$('#admin-live')) return;
     $('#admin-live').innerHTML = `<span class="dot"></span><span><strong>${live.users}${live.capped ? '+' : ''}</strong> live players</span><span><strong>${live.rooms}${live.capped ? '+' : ''}</strong> live rooms</span>`;
@@ -236,7 +248,7 @@ function errorMessage(error) {
 function header() {
   const r = state.room, active = inRound(r);
   return `<header class="floating-nav ${active ? 'in-round' : ''}">
-    <a class="brand" href="/" aria-label="Spyfall home"><img class="brand-wordmark" src="/wordmark.svg" alt="" width="112" height="38"><img class="brand-mini" src="/favicon.svg" alt="" width="34" height="34"></a>
+    <a class="brand" href="/" data-action="${r ? 'exit-room' : 'home'}" aria-label="Spyfall home"><img class="brand-wordmark" src="/wordmark.svg" alt="" width="112" height="38"><img class="brand-mini" src="/favicon.svg" alt="" width="34" height="34"></a>
     ${r ? `<span class="room-tag" aria-label="Room ${esc(state.code)}" title="Room code">${esc(state.code)}</span>` : ''}
     <nav class="nav-actions" aria-label="${r ? 'Room' : 'Game'} controls">
       ${active ? '<div class="nav-timer"><span id="timer" aria-label="Suggested time remaining">--:--</span></div>' : ''}
@@ -318,23 +330,20 @@ function rules() {
     <p class="fineprint">Everyone can see this list. Only non-spies see the chosen location. Save your changes before starting. This list is saved to your profile for future rooms.</p><button class="button secondary full" type="submit">Save rules ${icon('check')}</button>
   </form>` : `<dl class="rule-summary"><div><dt>Round length</dt><dd>${r.settings.minutes} minutes</dd></div><div><dt>Spies</dt><dd>${r.settings.spies}</dd></div><div><dt>Voting</dt><dd>${r.settings.voting === 'majority' ? 'Majority' : 'All except accused'}</dd></div></dl><div class="location-chips">${r.settings.locations.map(l => `<span>${esc(l)}</span>`).join('')}</div>`}</section>`;
 }
-function lobbySettings() {
-  return state.room.hostId === state.uid ? state.draft || state.room.settings : state.room.settings;
-}
 function updateLobbyReadiness() {
   if (state.room?.status !== 'lobby') return;
-  const spies = lobbySettings().spies, needed = requiredPlayers(spies) - state.room.players.length;
+  const { settings, needed, canStart } = lobbyReadiness(state.room, state.uid, state.draft);
   const waiting = $('#lobby-waiting');
   if (waiting) {
     waiting.hidden = needed <= 0;
-    waiting.textContent = needed > 0 ? `Waiting for ${needed} more ${needed === 1 ? 'player' : 'players'} for ${spyLabel(spies)}…` : '';
+    waiting.textContent = needed > 0 ? `Waiting for ${needed} more ${needed === 1 ? 'player' : 'players'} for ${spyLabel(settings.spies)}…` : '';
   }
   const start = $('[data-action="start"]');
-  if (start) start.disabled = state.busy || needed > 0;
+  if (start) start.disabled = state.busy || !canStart;
 }
 function lobby() {
   const r = state.room, host = r.hostId === state.uid;
-  const settings = lobbySettings();
+  const { settings } = lobbyReadiness(r, state.uid, state.draft);
   shell(`<div class="lobby-intro"><span class="eyebrow">THE LOBBY</span><h1>The usual suspects.</h1><p>${host ? 'Scan the code. Take your place.' : 'You’re in. Your host will start the round.'}<br>Best played with 4 or more people.</p></div>
     <section class="invite panel" aria-label="Invite friends"><div><label>INVITE YOUR FRIENDS</label><strong class="room-code">${esc(state.code)}</strong><button class="text-button" data-action="share">${icon('copy', 16)} Copy invite link</button></div><canvas id="qr" aria-label="Scan to join this room" role="img"></canvas></section>
     <div class="tabs lobby-tabs" role="tablist" aria-label="Lobby sections"><button role="tab" aria-selected="${state.tab === 'players'}" data-action="players">Players <span>${r.players.length}/${MAX_PLAYERS}</span></button><button role="tab" aria-selected="${state.tab === 'rules'}" data-action="rules">Game rules ${icon('clock', 16)}</button></div>
@@ -382,7 +391,7 @@ function render() {
   else ended();
 }
 function inviteUrl() { const url = new URL(location.origin); url.searchParams.set('room', state.code); return url.href; }
-function disconnect() { clockRound = null; previousSeconds = null; confirmedVotes = null; voteSoundRound = null; connectionVersion++; state.stops.forEach(stop => stop()); state.stops = []; stopRole?.(); stopRole = null; state.room = null; state.role = null; state.loading = false; state.draft = null; state.reveal = false; }
+function disconnect() { clockRound = null; previousSeconds = null; confirmedVotes = null; voteSoundRound = null; connectionVersion++; state.stops.forEach(stop => stop()); state.stops = []; stopRole?.(); stopRole = null; resetRoomView(state); }
 async function loadResult() {
   const roundId = state.room?.roundId, code = state.code;
   try {
@@ -400,11 +409,14 @@ async function loadResult() {
   } catch (error) { notice(errorMessage(error)); }
 }
 async function connect(code) {
-  disconnect(); state.tab = 'players'; state.code = code; state.loading = true; render();
+  disconnect(); state.code = code; state.loading = true; render();
   const version = connectionVersion;
   history.replaceState(null, '', `?room=${encodeURIComponent(code)}`);
   try {
-    state.uid = (await identity()).uid;
+    const user = await identity();
+    if (version !== connectionVersion) return;
+    state.uid = user.uid;
+    await refreshProfile(user);
     if (version !== connectionVersion) return;
     state.stops.push(onSnapshot(doc(db, 'rooms', code), { includeMetadataChanges: true }, snap => {
       if (version !== connectionVersion) return;
@@ -533,6 +545,7 @@ $('#app').addEventListener('submit', event => {
 });
 $('#app').addEventListener('click', event => {
   const button = event.target.closest('[data-action]'); if (!button) return;
+  if (button.tagName === 'A') event.preventDefault();
   const type = button.dataset.action;
   if (type === 'scores') return showLeaderboard();
   if (type === 'more-questions') { trackUsage('question_idea'); questionIndex = (questionIndex + 1) % QUESTION_IDEAS.length; $('#question-text').textContent = QUESTION_IDEAS[questionIndex]; return; }
@@ -589,24 +602,30 @@ setInterval(updateClock, 1000);
 state.loading = Boolean(state.code);
 render();
 // QR and invite links enter the room automatically; the name can be edited in the lobby.
+const initialConnectionVersion = connectionVersion;
 identity().then(async user => {
   state.uid = user.uid; startUsage(user.uid); lastScreen = '';
   await refreshProfile(user);
-  if (state.code) {
-    const snap = await getDoc(doc(db, 'rooms', state.code));
+  if (connectionVersion !== initialConnectionVersion) return;
+  if (initialRoomCode && state.code === initialRoomCode) {
+    if (!/^[A-Z2-9]{6}$/.test(initialRoomCode)) throw new Error('That invite has an invalid room code.');
+    const snap = await getDoc(doc(db, 'rooms', initialRoomCode));
+    if (connectionVersion !== initialConnectionVersion) return;
     if (!snap.exists()) throw new Error('That room does not exist. Check the invite link.');
     if (!snap.data().memberIds.includes(user.uid)) {
       const codename = () => `Agent ${crypto.randomUUID().slice(0, 6).toUpperCase()}`;
       let name = savedName || codename();
       if (Object.values(snap.data().players).some(p => p.name.toLowerCase() === name.toLowerCase())) name = codename();
-      await callGame({ action: 'join', code: state.code, name });
-      trackUsage('room_joined', { roomCode: state.code });
+      await callGame({ action: 'join', code: initialRoomCode, name });
+      if (connectionVersion !== initialConnectionVersion) return;
+      trackUsage('room_joined', { roomCode: initialRoomCode });
       savedName = name; try { localStorage.setItem('spyfall-name', name); } catch {}
     }
     await saveProfile(db, user.uid, savedName || snap.data().players[user.uid]?.name || `Agent ${user.uid.slice(0, 6)}`);
-    await connect(state.code);
+    if (connectionVersion !== initialConnectionVersion) return;
+    await connect(initialRoomCode);
   } else render();
-}).catch(error => { state.loading = false; render(); notice(errorMessage(error)); });
+}).catch(error => { if (connectionVersion !== initialConnectionVersion) return; state.loading = false; render(); notice(errorMessage(error)); });
 
 // A change in another tab must not leave the old player's room or secret visible.
 onIdTokenChanged(auth, user => {

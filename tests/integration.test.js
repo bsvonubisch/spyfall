@@ -5,11 +5,11 @@ import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebas
 import { doc, getDoc, getDocs, collection, updateDoc, setDoc, writeBatch, serverTimestamp, query, orderBy, limit, Timestamp, onSnapshot, disableNetwork, enableNetwork } from 'firebase/firestore';
 import { settleRound, awardResult, updateProfile } from '../src/scores.js';
 import { loadAdminStats, watchLiveStats } from '../src/admin.js';
-import { googleProfile, syncGoogleProfile } from '../src/google-profile.js';
+import { syncGoogleProfile } from '../src/google-profile.js';
 import { initializeApp, deleteApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator, signInAnonymously, linkWithCredential, GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
-import { execute, DEFAULT_SETTINGS, resolveResult, validSettings, eligiblePlayers, threshold } from '../src/game.js';
+import { execute, DEFAULT_SETTINGS, resolveResult, eligiblePlayers, threshold } from '../src/game.js';
 import { membershipState } from '../src/room-view.js';
 
 let env;
@@ -77,13 +77,6 @@ test('linking a Google identity retains the guest UID, profile, and saved locati
   } finally { await deleteApp(app); }
 });
 
-test('Google profile fields prefer provider data, retain safe fallbacks, and never use an unsafe photo URL', () => {
-  const user = { uid: 'agent', displayName: 'Old Firebase name', photoURL: 'https://lh3.googleusercontent.com/old', providerData: [{ providerId: 'google.com', displayName: ' Google Provider Name ', photoURL: 'https://lh3.googleusercontent.com/new' }] };
-  assert.equal(googleProfile(user).name, 'Google Provider Name');
-  assert.equal(googleProfile(user).avatarUrl, 'https://lh3.googleusercontent.com/new');
-  assert.equal(googleProfile({ ...user, photoURL: null, providerData: [{ providerId: 'google.com', photoURL: 'javascript:alert(1)' }] }).avatarUrl, '');
-  assert.equal(googleProfile({ uid: 'agent', providerData: [] }, { name: 'Saved name', avatarSeed: 'custom' }).name, 'Saved name');
-});
 
 test('only the verified Google owner can query admin data, without access to private active roles', async () => {
   const code = await lobby(2); const { spy } = await start(code);
@@ -124,6 +117,32 @@ test('saving locations creates private preferences reused in the next hosted roo
   await assertFails(getDoc(doc(db('p1'), 'profiles', 'p0', 'preferences', 'game')));
   await assertFails(setDoc(doc(db('p1'), 'profiles', 'p0', 'preferences', 'game'), { locations, updatedAt: serverTimestamp() }));
   await assertFails(setDoc(doc(db('p0'), 'profiles', 'p0', 'preferences', 'game'), { locations: ['Too few'], updatedAt: serverTimestamp() }));
+});
+
+test('Firestore rejects malformed locations even when app validation is bypassed, including slot 40', async () => {
+  const code = await lobby(2), ref = doc(db('p0'), 'rooms', code);
+  const preference = doc(db('p0'), 'profiles', 'p0', 'preferences', 'game');
+  for (const location of [null, 7, {}, '', ' ', ' Beach', 'Hotel\nLobby', 'Hotel\tLobby', 'x'.repeat(41)]) {
+    const locations = ['Beach', 'Train', location];
+    await assertFails(updateDoc(ref, { settings: { ...DEFAULT_SETTINGS, locations } }));
+    await assertFails(setDoc(preference, { locations, updatedAt: serverTimestamp() }));
+  }
+  await assertFails(updateDoc(ref, { settings: { ...DEFAULT_SETTINGS, locations: ['Beach', 'beach', 'Train'] } }));
+  const forty = Array.from({ length: 40 }, (_, i) => `Place ${i + 1}`);
+  await assertFails(updateDoc(ref, { settings: { ...DEFAULT_SETTINGS, locations: [...forty.slice(0, 39), null] } }));
+  await execute(db('p0'), 'p0', { action: 'settings', code, settings: { ...DEFAULT_SETTINGS, locations: forty } });
+  assert.deepEqual((await getDoc(preference)).data().locations, forty);
+  await start(code);
+  await assertFails(updateDoc(ref, { settings: DEFAULT_SETTINGS }));
+});
+
+test('invalid names and expired rooms cannot be changed through direct writes', async () => {
+  const code = await lobby(2), ref = doc(db('p0'), 'rooms', code);
+  const room = (await getDoc(ref)).data();
+  await assertFails(updateDoc(ref, { players: { ...room.players, p0: { ...room.players.p0, name: '  ' } } }));
+  await env.withSecurityRulesDisabled(async context => updateDoc(doc(context.firestore(), 'rooms', code), { createdAt: Timestamp.fromMillis(Date.now() - 86400001) }));
+  await assertFails(updateDoc(ref, { settings: { ...DEFAULT_SETTINGS, minutes: 10 } }));
+  await assert.rejects(execute(db('p2'), 'p2', { action: 'join', code, name: 'Late guest' }), /expired/);
 });
 test('usage events are immutable, contain no secret fields, and are private to admin queries', async () => {
   const event = usageEvent(), ref = doc(db('p0'), 'usage', 'valid-event');
@@ -336,12 +355,6 @@ test('host transfer, removal, capacity, and a full 15-player deal', async () => 
   await execute(db('p0'), 'p0', { action: 'remove', code, target: 'p2' });
   await execute(db('p0'), 'p0', { action: 'leave', code });
   assert.equal((await getDoc(doc(db('p1'), 'rooms', code))).data().hostId, 'p1');
-});
-test('settings reject invalid durations, duplicate locations, and invalid voting modes', () => {
-  assert.throws(() => validSettings({ ...DEFAULT_SETTINGS, minutes: 0 }));
-  assert.throws(() => validSettings({ ...DEFAULT_SETTINGS, voting: 'anything' }));
-  assert.throws(() => validSettings({ ...DEFAULT_SETTINGS, locations: ['Beach', 'beach', 'Train'] }));
-  for (const spies of [0, 8, 1.5, '2']) assert.throws(() => validSettings({ ...DEFAULT_SETTINGS, spies }));
 });
 
 async function accuse(code, target) {

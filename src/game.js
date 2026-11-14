@@ -18,9 +18,10 @@ export function validSettings(value) {
   check(['majority', 'unanimous'].includes(value.voting), 'Choose a voting rule.');
   check(Number.isInteger(value.spies ?? 1) && (value.spies ?? 1) >= 1 && (value.spies ?? 1) <= MAX_SPIES, 'Choose 1–3 spies.');
   check(Array.isArray(value.locations) && value.locations.length >= 3 && value.locations.length <= 40, 'Choose 3–40 locations.');
-  check(value.locations.every(l => typeof l === 'string' && l.trim().length > 0 && l.length <= 40), 'Use location names of 1–40 characters.');
-  check(new Set(value.locations.map(l => l.toLowerCase())).size === value.locations.length, 'Each location must be different.');
-  return value;
+  check(value.locations.every(l => typeof l === 'string' && l.trim().length > 0 && l.trim().length <= 40 && !/[\r\n\t]/.test(l)), 'Use location names of 1–40 characters on one line.');
+  const locations = value.locations.map(l => l.trim());
+  check(new Set(locations.map(l => l.toLowerCase())).size === locations.length, 'Each location must be different.');
+  return { minutes: value.minutes, voting: value.voting, spies: value.spies ?? 1, locations };
 }
 export function normalizeRoom(room) {
   return { ...room, settings: { spies: 1, ...room.settings }, caughtIds: room.caughtIds || [], players: room.memberIds.map(id => room.players[id]), endsAt: room.startedAt?.toMillis() + room.settings.minutes * 60000 };
