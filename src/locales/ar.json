@@ -358,7 +358,10 @@
     "Correct spy guess": "تخمين الجاسوس صحيح",
     "One minute left": "بقيت دقيقة واحدة",
     "Time up / round end": "انتهى الوقت / نهاية الجولة",
-    "Recorded events by language. Older events have no language recorded.": "الأحداث المسجلة حسب اللغة. لم تُسجّل اللغة للأحداث القديمة."
+    "Recorded events by language. Older events have no language recorded.": "الأحداث المسجلة حسب اللغة. لم تُسجّل اللغة للأحداث القديمة.",
+    "Skip to content": "انتقل إلى المحتوى",
+    "Read your role": "اقرأ دورك",
+    "Your role": "دورك"
   },
   "locations": {
     "Airport": "مطار",

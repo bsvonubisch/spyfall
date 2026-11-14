@@ -358,7 +358,10 @@
     "Correct spy guess": "Richtiger Spion-Tipp",
     "One minute left": "Noch eine Minute",
     "Time up / round end": "Zeit abgelaufen / Rundenende",
-    "Recorded events by language. Older events have no language recorded.": "Erfasste Ereignisse nach Sprache. Bei älteren Ereignissen wurde keine Sprache gespeichert."
+    "Recorded events by language. Older events have no language recorded.": "Erfasste Ereignisse nach Sprache. Bei älteren Ereignissen wurde keine Sprache gespeichert.",
+    "Skip to content": "Zum Inhalt springen",
+    "Read your role": "Deine Rolle lesen",
+    "Your role": "Deine Rolle"
   },
   "locations": {
     "Airport": "Flughafen",

@@ -358,7 +358,10 @@
     "Correct spy guess": "Spion raadt goed",
     "One minute left": "Nog één minuut",
     "Time up / round end": "Tijd om / einde ronde",
-    "Recorded events by language. Older events have no language recorded.": "Geregistreerde gebeurtenissen per taal. Bij oudere gebeurtenissen is geen taal vastgelegd."
+    "Recorded events by language. Older events have no language recorded.": "Geregistreerde gebeurtenissen per taal. Bij oudere gebeurtenissen is geen taal vastgelegd.",
+    "Skip to content": "Ga naar inhoud",
+    "Read your role": "Lees je rol",
+    "Your role": "Je rol"
   },
   "locations": {
     "Airport": "Luchthaven",

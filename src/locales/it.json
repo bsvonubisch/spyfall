@@ -358,7 +358,10 @@
     "Correct spy guess": "Risposta corretta della spia",
     "One minute left": "Manca un minuto",
     "Time up / round end": "Tempo scaduto / fine turno",
-    "Recorded events by language. Older events have no language recorded.": "Eventi registrati per lingua. Per gli eventi precedenti non è stata registrata la lingua."
+    "Recorded events by language. Older events have no language recorded.": "Eventi registrati per lingua. Per gli eventi precedenti non è stata registrata la lingua.",
+    "Skip to content": "Vai al contenuto",
+    "Read your role": "Leggi il tuo ruolo",
+    "Your role": "Il tuo ruolo"
   },
   "locations": {
     "Airport": "Aeroporto",

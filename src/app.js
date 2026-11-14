@@ -1,6 +1,11 @@
+import { roleContent } from './role-view.js';
 import './style.css';
 import './game-table.css';
 import './localization.css';
+import './accessibility.css';
+import { icon, soundIcon } from './icons.js';
+import { captureFocus, restoreFocus, bindTabNavigation } from './accessibility.js';
+import { homeView } from './home-view.js';
 import { renderHtml, appendHtml, escapeHtml as esc } from './render-html.js';
 import QRCode from 'qrcode';
 import {
@@ -55,7 +60,7 @@ import { avatar, playerAvatar } from './avatars.js';
 import { QUESTION_IDEAS } from './questions.js';
 import { clockCue } from './round-clock.js';
 import { caughtSpyCue, resultCue } from './round-cues.js';
-import { bindDialogViewport } from './dialog.js';
+import { bindDialogViewport, showDialog } from './dialog.js';
 import { settleRound, saveProfile, updateProfile } from './scores.js';
 import { auth, db, identity, callGame } from './firebase.js';
 import {
@@ -72,8 +77,8 @@ import { startUsage, stopUsage, trackUsage, usageScreen } from './usage.js';
 
 const $ = (selector) => document.querySelector(selector);
 bindDialogViewport($('#confirm'));
-const icon = (name, size = 20) =>
-  `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${{ eye: `<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>`, arrow: `<path d="M4 12h16m-6-6 6 6-6 6"/>`, plus: `<path d="M12 5v14M5 12h14"/>`, users: `<circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2m1-15a3 3 0 0 1 0 6m2 3a5 5 0 0 1 3 4v2"/>`, clock: `<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>`, lock: `<rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>`, check: `<path d="m5 12 4 4L19 6"/>`, copy: `<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/>`, pin: `<path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 0 1 14 0Z"/><circle cx="12" cy="10" r="2"/>`, exit: `<path d="M9 4H4v16h5m5-12 4 4-4 4m-5-4h11"/>` }[name] || ''}</svg>`;
+bindTabNavigation($('#app'));
+bindTabNavigation($('#confirm'));
 const initialRoomCode = new URLSearchParams(location.search).get('room')?.toUpperCase() || '';
 const state = {
   code: initialRoomCode,
@@ -94,7 +99,14 @@ let ownProfile = null,
   adminStats = null;
 let profileIdentity = '';
 const accountIdentity = (user) => (user ? `${user.uid}:${googleAccount(user)}` : '');
-const googleLogo = `<img class="google-logo" src="/google-icon.svg" width="40" height="40" alt="" aria-hidden="true">`;
+const googleLogo = /* HTML */ `<img
+  class="google-logo"
+  src="/google-icon.svg"
+  width="40"
+  height="40"
+  alt=""
+  aria-hidden="true"
+/>`;
 let stopAdminLive = null;
 $('#confirm').addEventListener('close', () => {
   stopAdminLive?.();
@@ -136,11 +148,33 @@ async function showLeaderboard(scope = state.room ? 'room' : 'overall') {
   const dialog = $('#confirm'),
     code = state.code;
   const roomAvailable = Boolean(state.room);
-  renderHtml(
+  const selectedScope = roomAvailable ? scope : 'overall';
+  showDialog(
     dialog,
-    `<h2>${t('Leaderboards')}</h2><div class="tabs score-tabs" role="tablist" aria-label="${t('Leaderboard')}">${roomAvailable ? `<button role="tab" data-scope="room" aria-selected="${scope === 'room'}">${t('This room')}</button>` : ''}<button role="tab" data-scope="overall" aria-selected="${scope === 'overall'}">${t('Overall')}</button></div><div id="scores-content" aria-live="polite"><p>${t('Loading standings…')}</p></div><button class="button quiet full" id="close-scores">${t('Close')}</button>`,
+    /* HTML */ `<h2>${t('Leaderboards')}</h2>
+      <div class="tabs score-tabs" role="tablist" aria-label="${t('Leaderboard')}">
+        ${roomAvailable ? /* HTML */ `<button role="tab" id="scores-room-tab" aria-controls="scores-content" tabindex="${selectedScope === 'room' ? 0 : -1}" data-scope="room" aria-selected="${scope === 'room'}">${t('This room')}</button>` : ''}<button
+          role="tab"
+          id="scores-overall-tab"
+          aria-controls="scores-content"
+          tabindex="${selectedScope === 'overall' ? 0 : -1}"
+          data-scope="overall"
+          aria-selected="${scope === 'overall'}"
+        >
+          ${t('Overall')}
+        </button>
+      </div>
+      <div
+        id="scores-content"
+        role="tabpanel"
+        tabindex="0"
+        aria-labelledby="scores-${selectedScope}-tab"
+        aria-live="polite"
+      >
+        <p>${t('Loading standings…')}</p>
+      </div>
+      <button class="button quiet full" id="close-scores">${t('Close')}</button>`,
   );
-  if (!dialog.open) dialog.showModal();
   $('#close-scores').onclick = () => dialog.close();
   dialog.querySelectorAll('[data-scope]').forEach((button) => {
     button.onclick = () => {
@@ -173,25 +207,49 @@ async function showLeaderboard(scope = state.room ? 'room' : 'overall') {
     if (!dialog.open || $('#scores-content') !== content) return;
     let rank = 0;
     const row = (p, position) =>
-      `<div class="score-row ${p.id === user.uid ? 'your-score' : ''}"><span class="score-rank">${position}</span><span class="avatar portrait">${playerAvatar(p)}</span><span class="score-name">${esc(scope === 'room' ? state.room?.players.find((player) => player.id === p.id)?.name || p.name : p.name)}${p.id === user.uid ? ` <small>${t('(you)')}</small>` : ''}<small>${t('Rounds: {count} · Wins: {percent}%', { count: p.gamesPlayed, percent: Math.round((p.wins / p.gamesPlayed) * 100) })}</small></span><strong>${t('Points: {count}', { count: p.wins })}</strong></div>`;
+      /* HTML */ `<div class="score-row ${p.id === user.uid ? 'your-score' : ''}">
+        <span class="score-rank">${position}</span
+        ><span class="avatar portrait">${playerAvatar(p)}</span
+        ><span class="score-name"
+          >${esc(scope === 'room' ? state.room?.players.find((player) => player.id === p.id)?.name || p.name : p.name)}${p.id === user.uid ? ` <small>${t('(you)')}</small>` : ''}<small
+            >${t('Rounds: {count} · Wins: {percent}%', { count: p.gamesPlayed, percent: Math.round((p.wins / p.gamesPlayed) * 100) })}</small
+          ></span
+        ><strong>${t('Points: {count}', { count: p.wins })}</strong>
+      </div>`;
     renderHtml(
       content,
-      `<p class="score-explainer">${t('1 point per team win. Every completed round counts.')}</p>${
-        entries.length
-          ? `<div class="score-list">${entries
-              .map((p, i) => {
-                if (!i || p.wins !== entries[i - 1].wins) rank = i + 1;
-                return row(p, rank);
-              })
-              .join('')}</div>`
-          : `<p class="score-empty">${t('No scores yet. Finish a round to get on the board.')}</p>`
-      }${own.exists() && own.data().gamesPlayed && !entries.some((p) => p.id === user.uid) ? `<p class="fineprint">${t('Your total')}</p>${row(own.data(), '—')}` : ''}<p class="fineprint score-identity">${scope === 'overall' ? t('Top 25 players. ') : ''}${googleAccount(user) ? t('Your profile follows your Google account.') : t('Your guest profile belongs to this browser. Connect Google from your profile to keep it across devices.')}</p>`,
+      /* HTML */ `<p class="score-explainer">
+          ${t('1 point per team win. Every completed round counts.')}
+        </p>
+        ${
+          entries.length
+            ? /* HTML */ `<div class="score-list">
+                ${entries
+                  .map((p, i) => {
+                    if (!i || p.wins !== entries[i - 1].wins) rank = i + 1;
+                    return row(p, rank);
+                  })
+                  .join('')}
+              </div>`
+            : /* HTML */ `<p class="score-empty">
+                ${t('No scores yet. Finish a round to get on the board.')}
+              </p>`
+        }${
+          own.exists() && own.data().gamesPlayed && !entries.some((p) => p.id === user.uid)
+            ? /* HTML */ `<p class="fineprint">${t('Your total')}</p>
+                ${row(own.data(), '—')}`
+            : ''
+        }
+        <p class="fineprint score-identity">
+          ${scope === 'overall' ? t('Top 25 players. ') : ''}${googleAccount(user) ? t('Your profile follows your Google account.') : t('Your guest profile belongs to this browser. Connect Google from your profile to keep it across devices.')}
+        </p>`,
     );
   } catch (error) {
     if ($('#scores-content') === content)
       renderHtml(
         content,
-        `<p>${esc(errorMessage(error))}</p><button class="button secondary full" id="retry-scores">${t('Try again')}</button>`,
+        /* HTML */ `<p>${esc(errorMessage(error))}</p>
+          <button class="button secondary full" id="retry-scores">${t('Try again')}</button>`,
       );
     $('#retry-scores')?.addEventListener('click', () => {
       void showLeaderboard(scope).catch(reportError);
@@ -256,11 +314,17 @@ async function signInGoogle(source = 'account') {
     const result = await request;
     if (result.credential) {
       const dialog = $('#confirm');
-      renderHtml(
+      showDialog(
         dialog,
-        `<h2>${t('Use your saved Google profile?')}</h2><p>${t('This account already has a profile. Switching will leave this room. Your guest scores and saved locations stay with the guest profile; they will not be merged.')}</p><button class="button primary full" id="switch-account">${t('Use Google profile')}</button><button class="button quiet full" id="keep-guest">${t('Keep playing as guest')}</button>`,
+        /* HTML */ `<h2>${t('Use your saved Google profile?')}</h2>
+          <p>
+            ${t('This account already has a profile. Switching will leave this room. Your guest scores and saved locations stay with the guest profile; they will not be merged.')}
+          </p>
+          <button class="button primary full" id="switch-account">${t('Use Google profile')}</button
+          ><button class="button quiet full" id="keep-guest">
+            ${t('Keep playing as guest')}
+          </button>`,
       );
-      if (!dialog.open) dialog.showModal();
       $('#keep-guest').onclick = () => dialog.close();
       $('#switch-account').onclick = () => {
         dialog.close();
@@ -309,11 +373,20 @@ async function showAccount(checkAdmin = true) {
   const connected = googleAccount(user),
     editable = canChangeAccount(),
     dialog = $('#confirm');
-  renderHtml(
+  showDialog(
     dialog,
-    `<span class="eyebrow">${t('YOUR ACCOUNT')}</span><h2>${connected ? t('Welcome back.') : t('Keep your identity.')}</h2><p>${connected ? t('Signed in as {v0}. Your profile and saved locations follow your Google account.', { v0: esc(user.email) }) : t('Guest play stays free and needs no account. Connect Google to keep your profile, scores, and saved locations across devices.')}</p>${connected ? `<button class="button secondary full" id="account-profile" ${!editable ? 'disabled' : ''}>${t('Edit profile')}</button><button class="button quiet full" id="account-signout" ${!editable ? 'disabled' : ''}>${t('Sign out')}</button>` : `<button class="button google-signin full" data-login-google ${!editable ? 'disabled' : ''}>${googleLogo} ${t('Continue with Google')}</button>`}${!editable ? `<p class="fineprint">${t('Return to the lobby to change your account or profile.')}</p>` : ''}<button class="button quiet full" id="close-account">${connected ? t('Close') : t('Keep playing as guest')}</button>`,
+    /* HTML */ `<span class="eyebrow">${t('YOUR ACCOUNT')}</span>
+      <h2>${connected ? t('Welcome back.') : t('Keep your identity.')}</h2>
+      <p>
+        ${connected ? t('Signed in as {v0}. Your profile and saved locations follow your Google account.', { v0: esc(user.email) }) : t('Guest play stays free and needs no account. Connect Google to keep your profile, scores, and saved locations across devices.')}
+      </p>
+      ${connected ? /* HTML */ `<button class="button secondary full" id="account-profile" ${!editable ? 'disabled' : ''}>${t('Edit profile')}</button><button class="button quiet full" id="account-signout" ${!editable ? 'disabled' : ''}>${t('Sign out')}</button>` : /* HTML */ `<button class="button google-signin full" data-login-google ${!editable ? 'disabled' : ''}>${googleLogo} ${t('Continue with Google')}</button>`}${!editable ? /* HTML */ `<p class="fineprint">${t('Return to the lobby to change your account or profile.')}</p>` : ''}<button
+        class="button quiet full"
+        id="close-account"
+      >
+        ${connected ? t('Close') : t('Keep playing as guest')}
+      </button>`,
   );
-  if (!dialog.open) dialog.showModal();
   $('#close-account').onclick = () => dialog.close();
   $('[data-login-google]')?.addEventListener('click', () => {
     void signInGoogle().catch(reportError);
@@ -366,11 +439,32 @@ async function showAdmin(force = false) {
   concealRole();
   const dialog = $('#confirm');
   stopAdminLive?.();
-  renderHtml(
+  showDialog(
     dialog,
-    `<div class="section-heading"><span class="eyebrow">${t('ADMIN AREA')}</span><button class="text-button" id="refresh-admin">${t('Refresh')}</button></div><h2>${t('The whole game.')}</h2><div id="admin-live" class="admin-live" aria-live="polite">${t('Connecting to live activity…')}</div><p class="fineprint">${t('Live means a visible app checked in during the last 3 minutes. Multiple tabs count as one player.')}</p><section class="admin-sounds" aria-labelledby="sound-tests-heading"><h3 id="sound-tests-heading">${t('Sound check')}</h3><div class="sound-test-grid">${SOUND_PREVIEWS.map((cue) => `<button type="button" class="button outline" data-preview-sound="${cue.id}">${t(cue.label)}</button>`).join('')}</div><p class="fineprint" id="sound-preview-status" role="status">${t('Preview sounds on this device.')}</p></section><div id="admin-content" aria-live="polite"><p>${t('Loading game stats…')}</p></div><button class="button primary full" id="close-admin">${t('Back to game')}</button><button class="button quiet full" id="admin-signout">${t('Sign out')}</button>`,
+    /* HTML */ `<div class="section-heading">
+        <span class="eyebrow">${t('ADMIN AREA')}</span
+        ><button class="text-button" id="refresh-admin">${t('Refresh')}</button>
+      </div>
+      <h2>${t('The whole game.')}</h2>
+      <div id="admin-live" class="admin-live" aria-live="polite">
+        ${t('Connecting to live activity…')}
+      </div>
+      <p class="fineprint">
+        ${t('Live means a visible app checked in during the last 3 minutes. Multiple tabs count as one player.')}
+      </p>
+      <section class="admin-sounds" aria-labelledby="sound-tests-heading">
+        <h3 id="sound-tests-heading">${t('Sound check')}</h3>
+        <div class="sound-test-grid">
+          ${SOUND_PREVIEWS.map((cue) => /* HTML */ `<button type="button" class="button outline" data-preview-sound="${cue.id}">${t(cue.label)}</button>`).join('')}
+        </div>
+        <p class="fineprint" id="sound-preview-status" role="status">
+          ${t('Preview sounds on this device.')}
+        </p>
+      </section>
+      <div id="admin-content" aria-live="polite"><p>${t('Loading game stats…')}</p></div>
+      <button class="button primary full" id="close-admin">${t('Back to game')}</button
+      ><button class="button quiet full" id="admin-signout">${t('Sign out')}</button>`,
   );
-  if (!dialog.open) dialog.showModal();
   const content = $('#admin-content');
   $('#close-admin').onclick = () => dialog.close();
   $('#refresh-admin').onclick = () => {
@@ -402,7 +496,9 @@ async function showAdmin(force = false) {
       if (!dialog.open || !$('#admin-live')) return;
       renderHtml(
         $('#admin-live'),
-        `<span class="dot"></span><span><strong>${live.users}${live.capped ? '+' : ''}</strong> ${t('live players')}</span><span><strong>${live.rooms}${live.capped ? '+' : ''}</strong> ${t('live rooms')}</span>`,
+        /* HTML */ `<span class="dot"></span
+          ><span><strong>${live.users}${live.capped ? '+' : ''}</strong> ${t('live players')}</span
+          ><span><strong>${live.rooms}${live.capped ? '+' : ''}</strong> ${t('live rooms')}</span>`,
       );
     },
     () => {
@@ -419,7 +515,9 @@ async function showAdmin(force = false) {
       return;
     const stats = adminStats;
     const metric = (label, value) =>
-      `<div class="admin-metric"><strong>${formatNumber(Number(value))}</strong><span>${t(label)}</span></div>`;
+      /* HTML */ `<div class="admin-metric">
+        <strong>${formatNumber(Number(value))}</strong><span>${t(label)}</span>
+      </div>`;
     const status = (room) =>
       Date.now() - room.createdAt.toMillis() > 86400000
         ? t('Expired')
@@ -428,22 +526,69 @@ async function showAdmin(force = false) {
           ] || room.status;
     renderHtml(
       content,
-      `<div class="admin-metrics">${metric(t('Player profiles'), stats.players)}${metric(t('Completed rounds'), stats.rounds)}${metric(t('Rounds · last 7 days'), stats.weekly)}${metric(t('Recent rooms · 24 hours'), stats.dailyRooms)}</div><p class="fineprint">${t('Profiles include guests. Completed rounds come from saved results. Room counts exclude rooms deleted when the last player leaves.')}</p><h3>${t('Recent rooms')}</h3><div class="admin-rooms">${stats.rooms.length ? stats.rooms.map((room) => `<div class="admin-room"><strong>${esc(room.code)}</strong><span>${t('{v0} players · {v1}', { v0: room.memberIds.length, v1: esc(status(room)) })}</span><small>${formatDate(room.createdAt.toDate())}</small></div>`).join('') : `<p>${t('No rooms yet.')}</p>`}</div><h3>${t('Most active players')}</h3>${stats.leaders.length ? stats.leaders.map((player) => `<div class="score-row"><span class="avatar portrait">${playerAvatar(player)}</span><span class="score-name">${esc(player.name)}<small>${t('{v0} rounds · {v1} wins', { v0: player.gamesPlayed, v1: player.wins })}</small></span></div>`).join('') : `<p>${t('No completed rounds yet.')}</p>`}<p class="fineprint">${t('Updated {v0}. Latest 12 rooms and top 5 players.', { v0: formatDate(stats.loadedAt, { hour: '2-digit', minute: '2-digit' }) })}</p>`,
+      /* HTML */ `<div class="admin-metrics">
+          ${metric(t('Player profiles'), stats.players)}${metric(t('Completed rounds'), stats.rounds)}${metric(t('Rounds · last 7 days'), stats.weekly)}${metric(t('Recent rooms · 24 hours'), stats.dailyRooms)}
+        </div>
+        <p class="fineprint">
+          ${t('Profiles include guests. Completed rounds come from saved results. Room counts exclude rooms deleted when the last player leaves.')}
+        </p>
+        <h3>${t('Recent rooms')}</h3>
+        <div class="admin-rooms">
+          ${stats.rooms.length ? stats.rooms.map((room) => /* HTML */ `<div class="admin-room"><strong>${esc(room.code)}</strong><span>${t('{v0} players · {v1}', { v0: room.memberIds.length, v1: esc(status(room)) })}</span><small>${formatDate(room.createdAt.toDate())}</small></div>`).join('') : /* HTML */ `<p>${t('No rooms yet.')}</p>`}
+        </div>
+        <h3>${t('Most active players')}</h3>
+        ${
+          stats.leaders.length
+            ? stats.leaders
+                .map(
+                  (player) =>
+                    /* HTML */ `<div class="score-row">
+                      <span class="avatar portrait">${playerAvatar(player)}</span
+                      ><span class="score-name"
+                        >${esc(player.name)}<small
+                          >${t('{v0} rounds · {v1} wins', { v0: player.gamesPlayed, v1: player.wins })}</small
+                        ></span
+                      >
+                    </div>`,
+                )
+                .join('')
+            : /* HTML */ `<p>${t('No completed rounds yet.')}</p>`
+        }
+        <p class="fineprint">
+          ${t('Updated {v0}. Latest 12 rooms and top 5 players.', { v0: formatDate(stats.loadedAt, { hour: '2-digit', minute: '2-digit' }) })}
+        </p>`,
     );
     appendHtml(
       content,
-      `<section class="language-usage"><h3>${t('Language usage')}</h3><p class="fineprint">${t('Recorded events by language. Older events have no language recorded.')}</p>${stats.languages.map((language) => `<div class="usage-row"><span lang="${language.code}" dir="auto">${esc(language.name)}</span><strong>${formatNumber(language.events)}</strong></div>`).join('')}</section>`,
+      /* HTML */ `<section class="language-usage">
+        <h3>${t('Language usage')}</h3>
+        <p class="fineprint">
+          ${t('Recorded events by language. Older events have no language recorded.')}
+        </p>
+        ${stats.languages.map((language) => /* HTML */ `<div class="usage-row"><span lang="${language.code}" dir="auto">${esc(language.name)}</span><strong>${formatNumber(language.events)}</strong></div>`).join('')}
+      </section>`,
     );
     const peak = Math.max(1, ...stats.days.map((day) => day.count));
     appendHtml(
       content,
-      `<h3>${t('Activity · last 7 days')}</h3><div class="usage-chart" role="img" aria-label="${t('Daily usage event counts')}">${stats.days.map((day) => `<div class="usage-day"><strong>${day.count}</strong><i style="height:${Math.round((day.count / peak) * 70)}px"></i><span>${formatDate(day.date, { weekday: 'short' })}</span></div>`).join('')}</div><h3>${t('Usage totals')}</h3>${stats.usage.map((item) => `<div class="usage-row"><span>${t(item.label)}</span><strong>${formatNumber(item.count)}</strong></div>`).join('')}<p class="fineprint">${t('Usage events are recorded from this update onward. Recoverable room creations are backfilled; earlier visits, votes, and guesses were not recorded. Secret roles and answers are never included.')}</p>`,
+      /* HTML */ `<h3>${t('Activity · last 7 days')}</h3>
+        <div class="usage-chart" role="group" aria-label="${t('Daily usage event counts')}">
+          ${stats.days.map((day) => /* HTML */ `<div class="usage-day"><strong>${day.count}</strong><i style="height:${Math.round((day.count / peak) * 70)}px"></i><span>${formatDate(day.date, { weekday: 'short' })}</span></div>`).join('')}
+        </div>
+        <h3>${t('Usage totals')}</h3>
+        ${stats.usage.map((item) => /* HTML */ `<div class="usage-row"><span>${t(item.label)}</span><strong>${formatNumber(item.count)}</strong></div>`).join('')}
+        <p class="fineprint">
+          ${t('Usage events are recorded from this update onward. Recoverable room creations are backfilled; earlier visits, votes, and guesses were not recorded. Secret roles and answers are never included.')}
+        </p>`,
     );
   } catch (error) {
     if ($('#admin-content') === content)
       renderHtml(
         content,
-        `<p>${esc(errorMessage(error))}</p><p class="fineprint">${t('Admin access requires the verified owner’s Google account.')}</p>`,
+        /* HTML */ `<p>${esc(errorMessage(error))}</p>
+          <p class="fineprint">
+            ${t('Admin access requires the verified owner’s Google account.')}
+          </p>`,
       );
   }
 }
@@ -463,11 +608,43 @@ function showProfileEditor() {
   const connected = googleAccount(user);
   let avatarSeed = player.avatarSeed || player.id,
     avatarUrl = connected ? googleProfile(user, player).avatarUrl : player.avatarUrl || '';
-  renderHtml(
+  showDialog(
     dialog,
-    `<form id="rename-form"><h2>${t('Your agent profile')}</h2><div class="avatar-editor"><span class="avatar portrait" id="profile-avatar">${playerAvatar({ ...player, avatarSeed, avatarUrl })}</span>${connected ? `<span class="fineprint">${t('Google profile photo')}</span>` : `<button type="button" class="button secondary" id="regenerate-avatar">${t('New avatar')}</button>`}</div><label for="player-name">${t('NAME')}</label><input id="player-name" maxlength="20" required autocomplete="nickname" value="${esc(player.name)}">${connected ? `<p class="account-identity">${t('Connected to {v0}', { v0: esc(user.email) })}</p>` : `<button type="button" class="button google-signin full profile-google" data-login-google>${googleLogo} ${t('Connect Google')}</button><p class="fineprint">${t('Use your Google name and photo, and keep your profile across devices.')}</p>`}<button class="button primary full name-save" type="submit">${t('Save profile')} ${icon('check')}</button><button class="button quiet full" type="button" id="cancel-name">${t('Cancel')}</button></form>`,
+    /* HTML */ `<form id="rename-form">
+      <h2>${t('Your agent profile')}</h2>
+      <div class="avatar-editor">
+        <span class="avatar portrait" id="profile-avatar"
+          >${playerAvatar({ ...player, avatarSeed, avatarUrl })}</span
+        >${connected ? /* HTML */ `<span class="fineprint">${t('Google profile photo')}</span>` : /* HTML */ `<button type="button" class="button secondary" id="regenerate-avatar">${t('New avatar')}</button>`}
+      </div>
+      <label for="player-name">${t('NAME')}</label
+      ><input
+        id="player-name"
+        data-initial-focus
+        maxlength="20"
+        required
+        autocomplete="nickname"
+        value="${esc(player.name)}"
+      />${
+        connected
+          ? /* HTML */ `<p class="account-identity">
+              ${t('Connected to {v0}', { v0: esc(user.email) })}
+            </p>`
+          : /* HTML */ `<button
+                type="button"
+                class="button google-signin full profile-google"
+                data-login-google
+              >
+                ${googleLogo} ${t('Connect Google')}
+              </button>
+              <p class="fineprint">
+                ${t('Use your Google name and photo, and keep your profile across devices.')}
+              </p>`
+      }<button class="button primary full name-save" type="submit">
+        ${t('Save profile')} ${icon('check')}</button
+      ><button class="button quiet full" type="button" id="cancel-name">${t('Cancel')}</button>
+    </form>`,
   );
-  if (!dialog.open) dialog.showModal();
   $('#regenerate-avatar')?.addEventListener('click', () => {
     avatarSeed = crypto.randomUUID();
     avatarUrl = '';
@@ -527,21 +704,62 @@ function reportError(error) {
 function header() {
   const r = state.room,
     active = inRound(r);
-  return `<header class="floating-nav ${active ? 'in-round' : ''}">
-    <a class="brand" href="/" data-action="${r ? 'exit-room' : 'home'}" aria-label="${t('Spyfall home')}"><img class="brand-wordmark" src="/wordmark.svg" alt="" width="112" height="38"><img class="brand-mini" src="/favicon.svg" alt="" width="34" height="34"></a>
-    ${r ? `<span class="room-tag" aria-label="${t('Room {v0}', { v0: esc(state.code) })}" title="${t('Room code')}">${esc(state.code)}</span>` : ''}
+  return /* HTML */ `<header class="floating-nav ${active ? 'in-round' : ''}">
+    <a
+      class="brand"
+      href="/"
+      data-action="${r ? 'exit-room' : 'home'}"
+      aria-label="${t('Spyfall home')}"
+      ><img class="brand-wordmark" src="/wordmark.svg" alt="" width="112" height="38" /><img
+        class="brand-mini"
+        src="/favicon.svg"
+        alt=""
+        width="34"
+        height="34"
+    /></a>
+    ${r ? /* HTML */ `<span class="room-tag" aria-label="${t('Room {v0}', { v0: esc(state.code) })}" title="${t('Room code')}">${esc(state.code)}</span>` : ''}
     <nav class="nav-actions" aria-label="${r ? t('Room controls') : t('Game controls')}">
-      ${active ? `<div class="nav-timer"><span id="timer" aria-label="${t('Suggested time remaining')}">--:--</span></div>` : ''}
-      <button type="button" class="nav-icon sound-control" data-action="sound" aria-label="${t('Sound')}" aria-pressed="${soundEnabled()}" title="${soundEnabled() ? t('Mute sound') : t('Enable sound')}">${soundIcon()}</button>
-      ${active && r.hostId === state.uid ? `<button type="button" class="nav-icon nav-stop" data-action="end-round" aria-label="${t('Round controls')}" title="${t('Round controls')}"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="3"/></svg></button>` : ''}
-      ${r ? `<button type="button" class="nav-icon nav-exit" data-action="exit-room" aria-label="${t('Exit room')}" title="${t('Exit room')}">${icon('exit', 20)}</button>` : ''}
+      ${active ? /* HTML */ `<div class="nav-timer"><span id="timer" role="timer" aria-live="off" aria-label="${t('Suggested time remaining')}">--:--</span></div>` : ''}
+      <button
+        type="button"
+        class="nav-icon sound-control"
+        data-action="sound"
+        aria-label="${t('Sound')}"
+        aria-pressed="${soundEnabled()}"
+        title="${soundEnabled() ? t('Mute sound') : t('Enable sound')}"
+      >
+        ${soundIcon(soundEnabled())}
+      </button>
+      ${
+        active && r.hostId === state.uid
+          ? /* HTML */ `<button
+              type="button"
+              class="nav-icon nav-stop"
+              data-action="end-round"
+              aria-label="${t('Round controls')}"
+              title="${t('Round controls')}"
+            >
+              <svg
+                width="19"
+                height="19"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                aria-hidden="true"
+              >
+                <rect x="5" y="5" width="14" height="14" rx="3" />
+              </svg>
+            </button>`
+          : ''
+      }
+      ${r ? /* HTML */ `<button type="button" class="nav-icon nav-exit" data-action="exit-room" aria-label="${t('Exit room')}" title="${t('Exit room')}">${icon('exit', 20)}</button>` : ''}
     </nav>
   </header>`;
 }
-function soundIcon() {
-  return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m11 4-5 4H3v8h3l5 4Z"/>${soundEnabled() ? `<path d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>` : `<path d="m16 9 6 6m0-6-6 6"/>`}</svg>`;
-}
 function shell(content) {
+  const focus = captureFocus($('#app'));
+  const previousScreen = lastScreen;
   const screen = `${state.code}:${inRound(state.room) ? 'round' : state.room?.status || 'home'}:${state.room?.roundId || 0}:${state.room?.status === 'lobby' ? state.tab : ''}`;
   const entered = lastScreen !== screen;
   const usageView = state.room
@@ -557,7 +775,27 @@ function shell(content) {
   if (entered) trackUsage('screen_view', { screen: usageView, roundId: state.room?.roundId || 0 });
   renderHtml(
     $('#app'),
-    `<div class="shell game-table">${header()}<main class="${entered ? 'screen-enter' : ''}">${content}</main><footer><button type="button" class="footer-credit" data-action="account" aria-label="${t('Open account')}">${t('made with {heart} by vonUbisch', { heart: `<span class="footer-heart" role="img" aria-label="${t('love')}">♥</span>` })}</button><div class="language-picker"><select id="language" aria-label="${t('Language')}">${LANGUAGES.map((item) => `<option value="${item.code}" lang="${item.code}" ${getLanguage() === item.code ? 'selected' : ''}>${item.name}</option>`).join('')}</select></div></footer></div>`,
+    /* HTML */ `<div class="shell game-table">
+      <a class="skip-link" href="#main-content">${t('Skip to content')}</a>${header()}
+      <main id="main-content" tabindex="-1" class="${entered ? 'screen-enter' : ''}">
+        ${content}
+      </main>
+      <footer>
+        <button
+          type="button"
+          class="footer-credit"
+          data-action="account"
+          aria-label="${t('Open account')}"
+        >
+          ${t('made with {heart} by vonUbisch', { heart: /* HTML */ `<span class="footer-heart" role="img" aria-label="${t('love')}">♥</span>` })}
+        </button>
+        <div class="language-picker">
+          <select id="language" aria-label="${t('Language')}">
+            ${LANGUAGES.map((item) => /* HTML */ `<option value="${item.code}" lang="${item.code}" ${getLanguage() === item.code ? 'selected' : ''}>${item.name}</option>`).join('')}
+          </select>
+        </div>
+      </footer>
+    </div>`,
   );
   document.querySelectorAll('[data-player-id]').forEach((row, index) => {
     if (entered || !lastPlayerIds.includes(row.dataset.playerId)) {
@@ -582,6 +820,7 @@ function shell(content) {
         button.disabled = true;
       });
   updateClock();
+  restoreFocus($('#app'), focus, (previousScreen && entered) || focus ? $('main') : null);
   if (focusPlayers && !state.busy) {
     focusPlayers = false;
     const tab = $('[data-action="players"]');
@@ -596,14 +835,28 @@ function homeAccount() {
   const user = auth.currentUser;
   if (googleAccount(user)) {
     const profile = ownProfile || googleProfile(user);
-    return `<button class="input-account connected" type="button" data-action="rename" aria-label="${t('Edit your Google profile')}" title="${t('Connected with Google · Edit profile')}"><span class="avatar portrait">${playerAvatar(profile)}</span></button>`;
+    return /* HTML */ `<button
+      class="input-account connected"
+      type="button"
+      data-action="rename"
+      aria-label="${t('Edit your Google profile')}"
+      title="${t('Connected with Google · Edit profile')}"
+    >
+      <span class="avatar portrait">${playerAvatar(profile)}</span>
+    </button>`;
   }
-  return `<button class="input-account" type="button" data-action="google" aria-label="${t('Continue with Google')}" title="${t('Continue with Google')}">${googleLogo}</button>`;
+  return /* HTML */ `<button
+    class="input-account"
+    type="button"
+    data-action="google"
+    aria-label="${t('Continue with Google')}"
+    title="${t('Continue with Google')}"
+  >
+    ${googleLogo}
+  </button>`;
 }
 function home() {
-  shell(
-    `<section class="hero"><div class="eyebrow"><span class="dot"></span> ${t('SAME ROOM. SEPARATE PHONES.')}</div><h1>${t('Good friends.')}<br><em>${t('Great liars.')}</em></h1><p>${t('One secret location. Spies in your midst.')}<br>${t('Find out who’s hiding in plain sight.')}</p><div class="hero-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="agent agent-one">${icon('eye', 44)}</div><div class="agent agent-two">${icon('eye', 44)}</div><div class="agent agent-three">?</div><span class="art-note">${t('trust no one.')}</span><span class="spark">✳</span></div><div class="facts"><span>${icon('users', 16)}${t('2–15 players')}</span><span>${icon('clock', 16)}${t('2–20 minutes')}</span><span>${t('1–3 spies.')}</span></div></section><section class="panel entry"><label for="entry-name">${t('WHAT SHOULD WE CALL YOU?')}</label><div class="name-field"><input id="entry-name" maxlength="20" autocomplete="nickname" placeholder="${t('Your name')}" value="${esc(savedName)}">${homeAccount()}</div><button class="button primary" data-action="create">${t('Create a room')} ${icon('plus')}</button><div class="divider"><span>${t('or join your friends')}</span></div><form id="join-form"><label class="sr-only" for="code">${t('Room code')}</label><div class="join-row"><input id="code" maxlength="6" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="${t('ROOM CODE')}" value="${esc(state.code)}" required pattern="[A-Za-z2-9]{6}"><button class="button secondary" type="submit">${t('Join')} ${icon('arrow')}</button></div></form><p class="fineprint">${t('Got a QR code? Scan it with your phone’s camera.')}</p></section><button class="text-button leaderboard-link" data-action="scores">${t('View overall leaderboard')}</button><section class="how"><div class="section-heading"><h2>${t('A quick briefing')}</h2><span>01—03</span></div><div class="step"><span>01</span><div><h3>${t('Get your secret')}</h3><p>${t('Everyone learns the location. Except the spies.')}</p></div></div><div class="step"><span>02</span><div><h3>${t('Ask. Answer. Act natural.')}</h3><p>${t('Question each other out loud. Be specific enough to fit in, vague enough to keep the secret.')}</p></div></div><div class="step"><span>03</span><div><h3>${t('Make your move')}</h3><p>${t('Vote out the spy, or guess the location if you are one. Watch the clock.')}</p></div></div></section>`,
-  );
+  shell(homeView({ name: savedName, code: state.code, account: homeAccount() }));
 }
 function playerList(voting = false) {
   const r = state.room;
@@ -613,7 +866,20 @@ function playerList(voting = false) {
       const caught = r.caughtIds.includes(p.id),
         canVote = r.status === 'active' && !r.caughtIds.includes(state.uid);
       const selected = r.votes[state.uid] === p.id;
-      return `<div class="player ${caught ? 'caught-player' : ''} ${selected && voting ? 'vote-selected' : ''}" data-player-id="${esc(p.id)}" data-vote="${count}"><span class="avatar portrait">${playerAvatar(p)}</span><div class="player-name"><bdi>${esc(p.name)}</bdi>${p.id === state.uid ? ` <small>${t('(you)')}</small>` : ''}<span class="player-meta">${caught ? t('Spy caught') : voting ? t('Votes: {count}', { count }) + (selected ? t(' · yours') : '') : p.id === r.hostId ? t('Host') : t('Ready')}</span></div>${voting ? (caught ? `<span class="caught-badge">${t('Caught')}</span>` : p.id !== state.uid ? `<button class="vote-button ${selected ? 'selected' : ''}" data-action="vote" data-target="${esc(p.id)}" aria-label="${t('Vote for {v0}', { v0: esc(p.name) })}" aria-pressed="${selected}" ${!canVote ? 'disabled' : ''}>${selected ? icon('check', 16) : `<span class="sr-only">${t('Vote')}</span>`}</button>` : '') : p.id === state.uid ? `<button class="text-button profile-action" data-action="rename">${t('Edit profile')}</button>` : state.uid === r.hostId ? `<button class="icon-button remove" data-action="remove" data-target="${esc(p.id)}" aria-label="${t('Remove {v0}', { v0: esc(p.name) })}">×</button>` : ''}</div>`;
+      return /* HTML */ `<div
+        class="player ${caught ? 'caught-player' : ''} ${selected && voting ? 'vote-selected' : ''}"
+        data-player-id="${esc(p.id)}"
+        data-vote="${count}"
+      >
+        <span class="avatar portrait">${playerAvatar(p)}</span>
+        <div class="player-name">
+          <bdi>${esc(p.name)}</bdi>${p.id === state.uid ? ` <small>${t('(you)')}</small>` : ''}<span
+            class="player-meta"
+            >${caught ? t('Spy caught') : voting ? t('Votes: {count}', { count }) + (selected ? t(' · yours') : '') : p.id === r.hostId ? t('Host') : t('Ready')}</span
+          >
+        </div>
+        ${voting ? (caught ? /* HTML */ `<span class="caught-badge">${t('Caught')}</span>` : p.id !== state.uid ? /* HTML */ `<button class="vote-button ${selected ? 'selected' : ''}" data-action="vote" data-target="${esc(p.id)}" aria-label="${t('Vote for {v0}', { v0: esc(p.name) })}" aria-pressed="${selected}" ${!canVote ? 'disabled' : ''}>${selected ? icon('check', 16) : /* HTML */ `<span class="sr-only">${t('Vote')}</span>`}</button>` : '') : p.id === state.uid ? /* HTML */ `<button class="text-button profile-action" data-action="rename">${t('Edit profile')}</button>` : state.uid === r.hostId ? /* HTML */ `<button class="icon-button remove" data-action="remove" data-target="${esc(p.id)}" aria-label="${t('Remove {v0}', { v0: esc(p.name) })}">×</button>` : ''}
+      </div>`;
     })
     .join('');
 }
@@ -657,20 +923,99 @@ function rules() {
   const r = state.room,
     host = r.hostId === state.uid,
     d = state.draft || r.settings;
-  return `<section class="panel settings"><div class="section-heading"><h2>${t('Set the scene')}</h2><span>${host ? t('HOST CONTROLS') : t('HOUSE RULES')}</span></div>${
-    host
-      ? `<form id="rules-form">
-    <label for="minutes">${t('ROUND LENGTH')} <output id="minutes-label">${t('{v0} min', { v0: d.minutes })}</output></label><input type="range" id="minutes" min="2" max="20" step="1" value="${d.minutes}" aria-valuetext="${t('{v0} minutes', { v0: d.minutes })}" style="--range-progress: ${((d.minutes - 2) / 18) * 100}%"><p class="fineprint">${t('Choose between 2 and 20 minutes.')}</p>
-    <label for="voting">${t('VOTING RULE')}</label><select id="voting"><option value="majority" ${d.voting === 'majority' ? 'selected' : ''}>${t('Majority wins')}</option><option value="unanimous" ${d.voting === 'unanimous' ? 'selected' : ''}>${t('Everyone except the accused')}</option></select>
-    <label for="spies">${t('NUMBER OF SPIES')}</label><select id="spies">${Array.from({ length: MAX_SPIES }, (_, i) => `<option value="${i + 1}" ${d.spies === i + 1 ? 'selected' : ''}>${t('{v0} · {v1}+ players', { v0: spyLabel(i + 1), v1: requiredPlayers(i + 1) })}</option>`).join('')}</select><p class="fineprint">${t('Catch every spy to win. Caught spies sit out.')}</p>
-    <label for="location-set">${t('LOCATION SET')}</label><select id="location-set">${LOCATION_SETS.map((set) => `<option value="${set.id}" ${locationSetId(d.locations) === set.id ? 'selected' : ''}>${t(set.name)}</option>`).join('')}${locationSetId(d.locations) === 'custom' ? `<option value="custom" selected>${t('Custom selection')}</option>` : ''}</select><p class="fineprint">${t('Choosing a set replaces the list below. Add, edit, or remove locations to make it your own.')}</p>
-    <div class="location-editor-heading">${t('POSSIBLE LOCATIONS')} <span>${t('{v0}/40 · minimum 3', { v0: d.locations.length })}</span></div>
-    <div class="location-editor">${d.locations.map((location, i) => `<div class="location-row"><input class="location-input" aria-label="${t('Location {v0}', { v0: i + 1 })}" maxlength="40" value="${esc(locationName(location))}" data-canonical="${esc(location)}" data-label="${esc(locationName(location))}" required><button type="button" class="remove-location" data-action="remove-location" data-index="${i}" aria-label="${esc(t('Remove {name}', { name: locationName(location) }))}" ${d.locations.length <= 3 ? 'disabled' : ''}>×</button></div>`).join('')}</div>
-    <label for="new-location">${t('ADD A LOCATION')}</label><div class="add-location-row"><input id="new-location" maxlength="40" placeholder="${t('e.g. Ski resort')}"><button type="button" class="button outline" data-action="add-location" ${d.locations.length >= 40 ? 'disabled' : ''}>${t('Add')} ${icon('plus', 16)}</button></div>
-    <p class="fineprint">${t('Everyone can see this list. Only non-spies see the chosen location. Save your changes before starting. This list is saved to your profile for future rooms. Enter custom locations in English; built-in places translate for each player.')}</p><button class="button secondary full" type="submit">${t('Save rules')} ${icon('check')}</button>
-  </form>`
-      : `<dl class="rule-summary"><div><dt>${t('Round length')}</dt><dd>${t('{v0} minutes', { v0: r.settings.minutes })}</dd></div><div><dt>${t('Spies')}</dt><dd>${r.settings.spies}</dd></div><div><dt>${t('Voting')}</dt><dd>${r.settings.voting === 'majority' ? t('Majority') : t('All except accused')}</dd></div></dl><div class="location-chips">${r.settings.locations.map((l) => `<span>${esc(locationName(l))}</span>`).join('')}</div>`
-  }</section>`;
+  return /* HTML */ `<section class="panel settings">
+    <div class="section-heading">
+      <h2>${t('Set the scene')}</h2>
+      <span>${host ? t('HOST CONTROLS') : t('HOUSE RULES')}</span>
+    </div>
+    ${
+      host
+        ? /* HTML */ `<form id="rules-form">
+            <label for="minutes"
+              >${t('ROUND LENGTH')}
+              <output id="minutes-label">${t('{v0} min', { v0: d.minutes })}</output></label
+            ><input
+              type="range"
+              id="minutes"
+              min="2"
+              max="20"
+              step="1"
+              value="${d.minutes}"
+              aria-valuetext="${t('{v0} minutes', { v0: d.minutes })}"
+              style="--range-progress: ${((d.minutes - 2) / 18) * 100}%"
+            />
+            <p class="fineprint">${t('Choose between 2 and 20 minutes.')}</p>
+            <label for="voting">${t('VOTING RULE')}</label
+            ><select id="voting">
+              <option value="majority" ${d.voting === 'majority' ? 'selected' : ''}>
+                ${t('Majority wins')}
+              </option>
+              <option value="unanimous" ${d.voting === 'unanimous' ? 'selected' : ''}>
+                ${t('Everyone except the accused')}
+              </option>
+            </select>
+            <label for="spies">${t('NUMBER OF SPIES')}</label
+            ><select id="spies">
+              ${Array.from({ length: MAX_SPIES }, (_, i) => /* HTML */ `<option value="${i + 1}" ${d.spies === i + 1 ? 'selected' : ''}>${t('{v0} · {v1}+ players', { v0: spyLabel(i + 1), v1: requiredPlayers(i + 1) })}</option>`).join('')}
+            </select>
+            <p class="fineprint">${t('Catch every spy to win. Caught spies sit out.')}</p>
+            <label for="location-set">${t('LOCATION SET')}</label
+            ><select id="location-set">
+              ${LOCATION_SETS.map((set) => /* HTML */ `<option value="${set.id}" ${locationSetId(d.locations) === set.id ? 'selected' : ''}>${t(set.name)}</option>`).join('')}${locationSetId(d.locations) === 'custom' ? /* HTML */ `<option value="custom" selected>${t('Custom selection')}</option>` : ''}
+            </select>
+            <p class="fineprint">
+              ${t('Choosing a set replaces the list below. Add, edit, or remove locations to make it your own.')}
+            </p>
+            <div class="location-editor-heading">
+              ${t('POSSIBLE LOCATIONS')}
+              <span>${t('{v0}/40 · minimum 3', { v0: d.locations.length })}</span>
+            </div>
+            <div class="location-editor">
+              ${d.locations.map((location, i) => /* HTML */ `<div class="location-row"><input class="location-input" data-focus-key="location-${i}" aria-label="${t('Location {v0}', { v0: i + 1 })}" maxlength="40" value="${esc(locationName(location))}" data-canonical="${esc(location)}" data-label="${esc(locationName(location))}" required /><button type="button" class="remove-location" data-action="remove-location" data-index="${i}" aria-label="${esc(t('Remove {name}', { name: locationName(location) }))}" ${d.locations.length <= 3 ? 'disabled' : ''}>×</button></div>`).join('')}
+            </div>
+            <label for="new-location">${t('ADD A LOCATION')}</label>
+            <div class="add-location-row">
+              <input
+                id="new-location"
+                maxlength="40"
+                placeholder="${t('e.g. Ski resort')}"
+              /><button
+                type="button"
+                class="button outline"
+                data-action="add-location"
+                ${d.locations.length >= 40 ? 'disabled' : ''}
+              >
+                ${t('Add')} ${icon('plus', 16)}
+              </button>
+            </div>
+            <p class="fineprint">
+              ${t('Everyone can see this list. Only non-spies see the chosen location. Save your changes before starting. This list is saved to your profile for future rooms. Enter custom locations in English; built-in places translate for each player.')}
+            </p>
+            <button class="button secondary full" type="submit">
+              ${t('Save rules')} ${icon('check')}
+            </button>
+          </form>`
+        : /* HTML */ `<dl class="rule-summary">
+              <div>
+                <dt>${t('Round length')}</dt>
+                <dd>${t('{v0} minutes', { v0: r.settings.minutes })}</dd>
+              </div>
+              <div>
+                <dt>${t('Spies')}</dt>
+                <dd>${r.settings.spies}</dd>
+              </div>
+              <div>
+                <dt>${t('Voting')}</dt>
+                <dd>
+                  ${r.settings.voting === 'majority' ? t('Majority') : t('All except accused')}
+                </dd>
+              </div>
+            </dl>
+            <div class="location-chips">
+              ${r.settings.locations.map((l) => /* HTML */ `<span>${esc(locationName(l))}</span>`).join('')}
+            </div>`
+    }
+  </section>`;
 }
 function updateLobbyReadiness() {
   if (state.room?.status !== 'lobby') return;
@@ -690,12 +1035,71 @@ function lobby() {
   const r = state.room,
     host = r.hostId === state.uid;
   const { settings } = lobbyReadiness(r, state.uid, state.draft);
-  shell(`<div class="lobby-intro"><span class="eyebrow">${t('THE LOBBY')}</span><h1>${t('The usual suspects.')}</h1><p>${host ? t('Scan the code. Take your place.') : t('You’re in. Your host will start the round.')}<br>${t('Best played with 4 or more people.')}</p></div>
-    <section class="invite panel" aria-label="${t('Invite friends')}"><div><label>${t('INVITE YOUR FRIENDS')}</label><strong class="room-code">${esc(state.code)}</strong><button class="text-button" data-action="share">${icon('copy', 16)} ${t('Copy invite link')}</button></div><canvas id="qr" aria-label="${t('Scan to join this room')}" role="img"></canvas></section>
-    <div class="tabs lobby-tabs" role="tablist" aria-label="${t('Lobby sections')}"><button role="tab" aria-selected="${state.tab === 'players'}" data-action="players">${t('Players')} <span>${r.players.length}/${MAX_PLAYERS}</span></button><button role="tab" aria-selected="${state.tab === 'rules'}" data-action="rules">${t('Game rules')} ${icon('clock', 16)}</button></div>
-    ${state.tab === 'players' ? `<section class="roster player-grid lobby-roster" aria-label="${t('Players')}">${playerList()}</section><div class="round-summary">${icon('clock', 16)} ${t('{v0} min', { v0: settings.minutes })} <span>·</span> ${t('{v0} locations', { v0: settings.locations.length })} <span>·</span> ${spyLabel(settings.spies)}${host && state.draft ? `<span>${t('· Unsaved changes')}</span>` : ''}</div>` : rules()}
-    <p class="waiting" id="lobby-waiting" aria-live="polite" hidden></p>
-    <div class="bottom-action">${host ? `<button class="button primary full" data-action="start" disabled>${t('Start the game')} ${icon('arrow')}</button>` : `<div class="waiting-host"><span class="pulse"></span> ${t('Waiting for the host to start')}</div>`}</div><button class="text-button leaderboard-link" data-action="scores">${t('Leaderboards')}</button>`);
+  shell(
+    /* HTML */ `<div class="lobby-intro">
+        <span class="eyebrow">${t('THE LOBBY')}</span>
+        <h1>${t('The usual suspects.')}</h1>
+        <p>
+          ${host ? t('Scan the code. Take your place.') : t('You’re in. Your host will start the round.')}<br />${t('Best played with 4 or more people.')}
+        </p>
+      </div>
+      <section class="invite panel" aria-label="${t('Invite friends')}">
+        <div>
+          <label>${t('INVITE YOUR FRIENDS')}</label
+          ><strong class="room-code">${esc(state.code)}</strong
+          ><button class="text-button" data-action="share">
+            ${icon('copy', 16)} ${t('Copy invite link')}
+          </button>
+        </div>
+        <canvas id="qr" aria-label="${t('Scan to join this room')}" role="img"></canvas>
+      </section>
+      <div class="tabs lobby-tabs" role="tablist" aria-label="${t('Lobby sections')}">
+        <button
+          role="tab"
+          id="players-tab"
+          aria-controls="lobby-panel"
+          tabindex="${state.tab === 'players' ? 0 : -1}"
+          aria-selected="${state.tab === 'players'}"
+          data-action="players"
+        >
+          ${t('Players')} <span>${r.players.length}/${MAX_PLAYERS}</span></button
+        ><button
+          role="tab"
+          id="rules-tab"
+          aria-controls="lobby-panel"
+          tabindex="${state.tab === 'rules' ? 0 : -1}"
+          aria-selected="${state.tab === 'rules'}"
+          data-action="rules"
+        >
+          ${t('Game rules')} ${icon('clock', 16)}
+        </button>
+      </div>
+      <div id="lobby-panel" role="tabpanel" tabindex="0" aria-labelledby="${state.tab}-tab">
+        ${
+          state.tab === 'players'
+            ? /* HTML */ `<section
+                  class="roster player-grid lobby-roster"
+                  aria-label="${t('Players')}"
+                >
+                  ${playerList()}
+                </section>
+                <div class="round-summary">
+                  ${icon('clock', 16)} ${t('{v0} min', { v0: settings.minutes })}
+                  <span>·</span> ${t('{v0} locations', { v0: settings.locations.length })}
+                  <span>·</span>
+                  ${spyLabel(settings.spies)}${host && state.draft ? /* HTML */ `<span>${t('· Unsaved changes')}</span>` : ''}
+                </div>`
+            : rules()
+        }
+      </div>
+      <p class="waiting" id="lobby-waiting" aria-live="polite" hidden></p>
+      <div class="bottom-action">
+        ${host ? /* HTML */ `<button class="button primary full" data-action="start" disabled>${t('Start the game')} ${icon('arrow')}</button>` : /* HTML */ `<div class="waiting-host"><span class="pulse"></span> ${t('Waiting for the host to start')}</div>`}
+      </div>
+      <button class="text-button leaderboard-link" data-action="scores">
+        ${t('Leaderboards')}
+      </button>`,
+  );
   updateLobbyReadiness();
   QRCode.toCanvas($('#qr'), inviteUrl(), {
     width: 256,
@@ -707,29 +1111,96 @@ function active() {
   const r = state.room,
     role = state.role?.roundId === r.roundId ? state.role : null;
   const spy = role?.isSpy;
-  const locations = `<section class="locations-detail" aria-labelledby="locations-heading">
-    <div class="section-heading"><h2 id="locations-heading">${t('Possible locations')}</h2><span>${r.settings.locations.length} ${icon('pin', 16)}</span></div>
+  const locations = /* HTML */ `<section
+    class="locations-detail"
+    aria-labelledby="locations-heading"
+  >
+    <div class="section-heading">
+      <h2 id="locations-heading">${t('Possible locations')}</h2>
+      <span>${r.settings.locations.length} ${icon('pin', 16)}</span>
+    </div>
     <p class="fineprint">${t('Your shared shortlist. Spies can tap a place to guess.')}</p>
-    <div class="location-chips guess-grid">${r.settings.locations.map((l) => `<button data-action="guess" data-location="${esc(l)}" aria-label="${esc(t('Guess {location}', { location: locationName(l) }))}" ${r.status === 'accusing' || r.caughtIds.includes(state.uid) ? 'disabled' : ''}>${esc(locationName(l))}</button>`).join('')}</div>
+    <div class="location-chips guess-grid">
+      ${r.settings.locations.map((l) => /* HTML */ `<button data-action="guess" data-location="${esc(l)}" aria-label="${esc(t('Guess {location}', { location: locationName(l) }))}" ${r.status === 'accusing' || r.caughtIds.includes(state.uid) ? 'disabled' : ''}>${esc(locationName(l))}</button>`).join('')}
+    </div>
   </section>`;
-  shell(`<div class="round-context"><span>${t('ROUND {v0} · {v1}', { v0: String(r.roundId).padStart(2, '0'), v1: spyLabel(r.settings.spies).toUpperCase() })}</span>${r.settings.spies > 1 ? `<span>${t('{v0}/{v1} caught', { v0: r.caughtIds.length, v1: r.settings.spies })}</span>` : ''}</div><h1 class="round-title">${t('Trust your instincts.')}</h1>
-    ${r.status === 'accusing' ? `<p class="round-status" role="status"><span class="pulse"></span> ${t('Checking the accusation…')}</p>` : ''}
-    ${r.caughtIds.includes(state.uid) ? `<p class="round-status">${t('You’ve been caught. Watch the remaining players finish the round.')}</p>` : ''}
-    <section class="role-card ${state.reveal && spy ? 'spy-card' : ''}" id="role-card"><button class="hold-reveal role-trigger" id="reveal-role" type="button" aria-label="${t('Hold to reveal your role')}" aria-pressed="${state.reveal}" aria-describedby="reveal-help" ${!role ? 'disabled' : ''}><span id="role-content">${roleContent(role)}</span><span class="role-control">${icon('eye', 24)}</span></button><span id="reveal-help" class="sr-only">${t('Release to hide. Keyboard: hold Space or Enter.')}</span></section>
-    <p id="timer-guidance" class="round-status timer-guidance" role="status" hidden></p>
-    <div class="section-heading section-space"><h2>${t('Who’s the spy?')}</h2><span>${t('{v0}/{v1} VOTED', { v0: Object.keys(r.votes).length, v1: eligiblePlayers(r).length })}</span></div>
-    <p class="section-description">${t('Tap a player to vote. Votes needed: {count}.', { count: threshold(r) })}${r.settings.spies > 1 ? t(' Catch every spy to win.') : ''}</p>
-    <section class="roster player-grid voting-roster" aria-label="${t('Vote for a player')}">${playerList(true)}</section>
-    <p class="fineprint centered vote-help">${t('You can change your vote until an accusation passes.')}</p>
-    ${locations}
-    <section class="question-ideas" aria-label="${t('Question ideas')}"><div><span class="eyebrow">${t('ASK AROUND')}</span><p id="question-text" aria-live="polite">${questionText(QUESTION_IDEAS[questionIndex % QUESTION_IDEAS.length])}</p></div><button class="nav-icon" data-action="more-questions" aria-label="${t('Next question idea')}">${icon('arrow', 20)}</button></section>`);
+  shell(
+    /* HTML */ `<div class="round-context">
+        <span
+          >${t('ROUND {v0} · {v1}', { v0: String(r.roundId).padStart(2, '0'), v1: spyLabel(r.settings.spies).toUpperCase() })}</span
+        >${r.settings.spies > 1 ? /* HTML */ `<span>${t('{v0}/{v1} caught', { v0: r.caughtIds.length, v1: r.settings.spies })}</span>` : ''}
+      </div>
+      <h1 class="round-title">${t('Trust your instincts.')}</h1>
+      ${r.status === 'accusing' ? /* HTML */ `<p class="round-status" role="status"><span class="pulse"></span> ${t('Checking the accusation…')}</p>` : ''}
+      ${r.caughtIds.includes(state.uid) ? /* HTML */ `<p class="round-status">${t('You’ve been caught. Watch the remaining players finish the round.')}</p>` : ''}
+      <section class="role-card ${state.reveal && spy ? 'spy-card' : ''}" id="role-card">
+        <button
+          class="hold-reveal role-trigger"
+          id="reveal-role"
+          type="button"
+          aria-label="${t('Hold to reveal your role')}"
+          aria-pressed="${state.reveal}"
+          aria-describedby="reveal-help"
+          ${!role ? 'disabled' : ''}
+        >
+          <span id="role-content">${roleContent(role, state.reveal)}</span
+          ><span class="role-control">${icon('eye', 24)}</span></button
+        ><span id="reveal-help" class="sr-only"
+          >${t('Release to hide. Keyboard: hold Space or Enter.')}</span
+        >
+      </section>
+      <button
+        type="button"
+        class="text-button role-access"
+        data-action="read-role"
+        ${!role ? 'disabled' : ''}
+      >
+        ${t('Read your role')}
+      </button>
+      <p id="timer-guidance" class="round-status timer-guidance" role="status" hidden></p>
+      <div class="section-heading section-space">
+        <h2>${t('Who’s the spy?')}</h2>
+        <span
+          >${t('{v0}/{v1} VOTED', { v0: Object.keys(r.votes).length, v1: eligiblePlayers(r).length })}</span
+        >
+      </div>
+      <p class="section-description">
+        ${t('Tap a player to vote. Votes needed: {count}.', { count: threshold(r) })}${r.settings.spies > 1 ? t(' Catch every spy to win.') : ''}
+      </p>
+      <section class="roster player-grid voting-roster" aria-label="${t('Vote for a player')}">
+        ${playerList(true)}
+      </section>
+      <p class="fineprint centered vote-help">
+        ${t('You can change your vote until an accusation passes.')}
+      </p>
+      ${locations}
+      <section class="question-ideas" aria-label="${t('Question ideas')}">
+        <div>
+          <span class="eyebrow">${t('ASK AROUND')}</span>
+          <p id="question-text" aria-live="polite">
+            ${questionText(QUESTION_IDEAS[questionIndex % QUESTION_IDEAS.length])}
+          </p>
+        </div>
+        <button
+          class="nav-icon"
+          data-action="more-questions"
+          aria-label="${t('Next question idea')}"
+        >
+          ${icon('arrow', 20)}
+        </button>
+      </section>`,
+  );
 }
 function ended() {
   const r = state.room,
     result = r.result;
   if (!result?.winner)
     return shell(
-      `<div class="loading"><span class="pulse"></span><h2>${t('Opening the case file…')}</h2><button class="text-button" data-action="refresh-result">${t('Try again')}</button></div>`,
+      /* HTML */ `<div class="loading">
+        <span class="pulse"></span>
+        <h2>${t('Opening the case file…')}</h2>
+        <button class="text-button" data-action="refresh-result">${t('Try again')}</button>
+      </div>`,
     );
   const spies = r.players.filter((p) => result.spyIds.includes(p.id)),
     multiple = spies.length > 1;
@@ -754,14 +1225,55 @@ function ended() {
               { name: accused?.name },
             );
   shell(
-    `<div class="eyebrow page-label"><span class="dot"></span> ${t('ROUND {v0} COMPLETE', { v0: r.roundId })}</div><div class="result-art">${icon('eye', 80)}<span>${t('CASE CLOSED')}</span></div><h1 class="page-title result-title">${result.winner === 'spy' ? `<em>${t(multiple ? 'The spies escaped.' : 'The spy escaped.')}</em>` : `<em>${t('Cover blown.')}</em>`}</h1><p class="subtitle">${result.winner === 'spy' ? t(multiple ? 'The spies win this round.' : 'The spy wins this round.') : t('The group wins this round.')}</p><section class="panel result-panel"><label>${multiple ? t('THE SPIES WERE') : t('THE SPY WAS')}</label><h2>${spies.map((p) => `<span class="named-player"><span class="avatar portrait">${playerAvatar(p)}</span><bdi>${esc(p.name)}</bdi></span>`).join('')}</h2><div class="result-location">${icon('pin')}<div><label>${t('THE SECRET LOCATION')}</label><strong>${esc(locationName(result.location))}</strong></div></div><p class="result-reason">${(result.reason === 'vote' ? accused : result.reason === 'guess' ? spy : null) ? `<span class="avatar portrait">${playerAvatar(result.reason === 'vote' ? accused : spy)}</span>` : ''}<span>${esc(reason)}</span></p></section><div class="bottom-action">${state.uid === r.hostId ? `<button class="button primary full" data-action="reset">${t('Back to lobby')} ${icon('arrow')}</button>` : `<div class="waiting-host"><span class="pulse"></span> ${t('Waiting for the host’s next round')}</div>`}<button class="text-button leaderboard-link" data-action="scores">${t('Leaderboards')}</button><p class="fineprint centered">${t('Same friends. A new secret.')}</p></div>`,
+    /* HTML */ `<div class="eyebrow page-label">
+        <span class="dot"></span> ${t('ROUND {v0} COMPLETE', { v0: r.roundId })}
+      </div>
+      <div class="result-art">${icon('eye', 80)}<span>${t('CASE CLOSED')}</span></div>
+      <h1 class="page-title result-title">
+        ${result.winner === 'spy' ? /* HTML */ `<em>${t(multiple ? 'The spies escaped.' : 'The spy escaped.')}</em>` : /* HTML */ `<em>${t('Cover blown.')}</em>`}
+      </h1>
+      <p class="subtitle">
+        ${result.winner === 'spy' ? t(multiple ? 'The spies win this round.' : 'The spy wins this round.') : t('The group wins this round.')}
+      </p>
+      <section class="panel result-panel">
+        <label>${multiple ? t('THE SPIES WERE') : t('THE SPY WAS')}</label>
+        <h2>
+          ${spies.map((p) => /* HTML */ `<span class="named-player"><span class="avatar portrait">${playerAvatar(p)}</span><bdi>${esc(p.name)}</bdi></span>`).join('')}
+        </h2>
+        <div class="result-location">
+          ${icon('pin')}
+          <div>
+            <label>${t('THE SECRET LOCATION')}</label
+            ><strong>${esc(locationName(result.location))}</strong>
+          </div>
+        </div>
+        <p class="result-reason">
+          ${(result.reason === 'vote' ? accused : result.reason === 'guess' ? spy : null) ? /* HTML */ `<span class="avatar portrait">${playerAvatar(result.reason === 'vote' ? accused : spy)}</span>` : ''}<span
+            >${esc(reason)}</span
+          >
+        </p>
+      </section>
+      <div class="bottom-action">
+        ${state.uid === r.hostId ? /* HTML */ `<button class="button primary full" data-action="reset">${t('Back to lobby')} ${icon('arrow')}</button>` : /* HTML */ `<div class="waiting-host"><span class="pulse"></span> ${t('Waiting for the host’s next round')}</div>`}<button
+          class="text-button leaderboard-link"
+          data-action="scores"
+        >
+          ${t('Leaderboards')}
+        </button>
+        <p class="fineprint centered">${t('Same friends. A new secret.')}</p>
+      </div>`,
   );
 }
 function render() {
+  if ($('#confirm[open] [data-private-role]')) $('#confirm').close();
   if (state.reveal) concealRole();
   if (state.loading && !state.room)
     return shell(
-      `<div class="loading"><span class="pulse"></span><h2>${t('Finding your room…')}</h2><button class="text-button" data-action="home">${t('Return home')}</button></div>`,
+      /* HTML */ `<div class="loading">
+        <span class="pulse"></span>
+        <h2>${t('Finding your room…')}</h2>
+        <button class="text-button" data-action="home">${t('Return home')}</button>
+      </div>`,
     );
   if (!state.room) return home();
   if (state.room.status === 'lobby') lobby();
@@ -933,11 +1445,24 @@ async function resolveAccusation() {
 }
 function confirmAction(title, text, label, task, player = null) {
   const dialog = $('#confirm');
-  renderHtml(
+  showDialog(
     dialog,
-    `<form method="dialog"><span class="eyebrow">${t('MAKE YOUR MOVE')}</span><h2>${esc(t(title))}</h2>${player ? `<div class="named-player"><span class="avatar portrait">${playerAvatar(player)}</span><strong><bdi>${esc(player.name)}</bdi></strong></div>` : ''}<p>${esc(t(text))}</p><button class="button primary full" id="confirm-action" type="button">${esc(t(label))}</button><button class="button quiet full" value="cancel">${t('Not yet')}</button></form>`,
+    /* HTML */ `<form method="dialog">
+      <span class="eyebrow">${t('MAKE YOUR MOVE')}</span>
+      <h2>${esc(t(title))}</h2>
+      ${
+        player
+          ? /* HTML */ `<div class="named-player">
+              <span class="avatar portrait">${playerAvatar(player)}</span
+              ><strong><bdi>${esc(player.name)}</bdi></strong>
+            </div>`
+          : ''
+      }
+      <p>${esc(t(text))}</p>
+      <button class="button primary full" id="confirm-action" type="button">${esc(t(label))}</button
+      ><button class="button quiet full" value="cancel">${t('Not yet')}</button>
+    </form>`,
   );
-  dialog.showModal();
   $('#confirm-action').onclick = () => {
     dialog.close();
     void run(task);
@@ -949,6 +1474,7 @@ async function run(task) {
     notice(t('You’re offline. Reconnect to make your move.'));
     return;
   }
+  const focus = captureFocus($('#app'));
   state.busy = true;
   notice('');
   document.querySelectorAll('button').forEach((b) => {
@@ -961,6 +1487,7 @@ async function run(task) {
   } finally {
     state.busy = false;
     render();
+    restoreFocus($('#app'), focus);
   }
 }
 async function action(type, extra = {}) {
@@ -993,17 +1520,11 @@ function getName() {
   } catch {}
   return name;
 }
-function roleContent(role) {
-  if (!role)
-    return `<strong class="role-title">${t('Retrieving your role…')}</strong><span class="role-note">${t('Your secret briefing is on its way.')}</span>`;
-  if (!state.reveal)
-    return `<strong class="role-title">${t('For your eyes only.')}</strong><span class="role-note">${t('Hold to reveal · release to hide')}</span>`;
-  return `<span class="role-label">${role.isSpy ? t('YOUR MISSION') : t('YOU ARE NOT THE SPY')}</span><strong class="role-title">${role.isSpy ? t('You’re the spy.') : esc(locationName(role.location))}</strong><span class="role-note">${role.isSpy ? t('Blend in. Guess the location.') : t('Keep this location secret.')}</span>`;
-}
 function concealRole() {
   heldPointer = null;
   heldKey = null;
   setRoleRevealed(false);
+  if ($('#confirm[open] [data-private-role]')) $('#confirm').close();
 }
 function setRoleRevealed(reveal) {
   const wasRevealed = state.reveal;
@@ -1017,11 +1538,15 @@ function setRoleRevealed(reveal) {
   if (content)
     renderHtml(
       content,
-      roleContent(state.role?.roundId === state.room?.roundId ? state.role : null),
+      roleContent(state.role?.roundId === state.room?.roundId ? state.role : null, state.reveal),
     );
   card?.classList.toggle('spy-card', Boolean(state.reveal && state.role?.isSpy));
   card?.classList.toggle('is-revealed', state.reveal);
   button?.setAttribute('aria-pressed', String(state.reveal));
+  button?.setAttribute(
+    'aria-label',
+    state.reveal ? content.textContent : t('Hold to reveal your role'),
+  );
 }
 $('#app').addEventListener('pointerdown', (event) => {
   if (!event.target.closest('#reveal-role') || event.button !== 0 || !event.isPrimary || state.busy)
@@ -1074,6 +1599,7 @@ $('#app').addEventListener('change', (event) => {
   if (event.target.id === 'language') {
     const picker = event.target,
       code = picker.value;
+    const focus = captureFocus($('#app'));
     if ($('#rules-form')) state.draft = readRulesForm();
     const pendingLocation = $('#new-location')?.value || '';
     picker.disabled = true;
@@ -1083,6 +1609,7 @@ $('#app').addEventListener('change', (event) => {
         if (!changed) return;
         applyDocumentLanguage();
         render();
+        restoreFocus($('#app'), focus);
         if ($('#new-location')) $('#new-location').value = pendingLocation;
         trackUsage('language_changed');
       })
@@ -1207,9 +1734,24 @@ $('#app').addEventListener('click', (event) => {
         render();
       },
     );
+  if (type === 'read-role') {
+    if (state.role?.roundId !== state.room?.roundId) return;
+    const dialog = $('#confirm');
+    showDialog(
+      dialog,
+      /* HTML */ `<div class="private-briefing" data-private-role>
+          <h2>${t('Your role')}</h2>
+          ${roleContent(state.role, true)}
+        </div>
+        <button type="button" class="button primary full" id="close-role">${t('Close')}</button>`,
+    );
+    $('#close-role').onclick = () => dialog.close();
+    trackUsage('role_revealed', { roundId: state.room.roundId });
+    return;
+  }
   if (type === 'sound') {
     toggleSound();
-    renderHtml(button, soundIcon());
+    renderHtml(button, soundIcon(soundEnabled()));
     button.setAttribute('aria-pressed', String(soundEnabled()));
     button.title = soundEnabled() ? t('Mute sound') : t('Enable sound');
     return;
@@ -1315,10 +1857,13 @@ function updateClock() {
   const guidance = $('#timer-guidance');
   if (guidance) {
     guidance.hidden = seconds > 60;
-    guidance.textContent =
-      seconds === 0
-        ? t('Time’s up. Keep playing—the host decides when to end the round.')
-        : t('One minute left. Time to vote for your suspects.');
+    const message =
+      seconds > 60
+        ? ''
+        : seconds === 0
+          ? t('Time’s up. Keep playing—the host decides when to end the round.')
+          : t('One minute left. Time to vote for your suspects.');
+    if (guidance.textContent !== message) guidance.textContent = message;
   }
 }
 document.addEventListener('visibilitychange', () => {

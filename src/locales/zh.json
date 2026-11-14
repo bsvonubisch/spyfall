@@ -358,7 +358,10 @@
     "Correct spy guess": "间谍猜对",
     "One minute left": "还剩一分钟",
     "Time up / round end": "时间到／回合结束",
-    "Recorded events by language. Older events have no language recorded.": "按语言统计的已记录事件。旧事件未记录语言。"
+    "Recorded events by language. Older events have no language recorded.": "按语言统计的已记录事件。旧事件未记录语言。",
+    "Skip to content": "跳转到主要内容",
+    "Read your role": "查看你的角色",
+    "Your role": "你的角色"
   },
   "locations": {
     "Airport": "机场",

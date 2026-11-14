@@ -358,7 +358,10 @@
     "Correct spy guess": "Шпион угадал",
     "One minute left": "Осталась одна минута",
     "Time up / round end": "Время вышло / конец раунда",
-    "Recorded events by language. Older events have no language recorded.": "Записанные события по языкам. Для старых событий язык не записывался."
+    "Recorded events by language. Older events have no language recorded.": "Записанные события по языкам. Для старых событий язык не записывался.",
+    "Skip to content": "Перейти к содержимому",
+    "Read your role": "Прочитать свою роль",
+    "Your role": "Ваша роль"
   },
   "locations": {
     "Airport": "Аэропорт",

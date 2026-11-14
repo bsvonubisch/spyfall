@@ -1,0 +1,93 @@
+/* Shared interaction rules, loaded after the visual theme and RTL layout. */
+html {
+  scroll-padding-top: calc(100px + env(safe-area-inset-top));
+}
+:where(button, a, input, select, textarea, [tabindex]) {
+  scroll-margin-block: 100px 24px;
+}
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid #f4f8ff;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 3px #101e35;
+}
+#main-content:focus {
+  outline: none;
+  box-shadow: none;
+}
+.skip-link {
+  position: fixed;
+  inset-block-start: 12px;
+  inset-inline-start: 12px;
+  z-index: 30;
+  padding: 12px 18px;
+  background: #f4f8ff;
+  color: #101e35;
+  border-radius: 12px;
+}
+.skip-link:not(:focus) {
+  clip-path: inset(50%);
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+.text-button,
+.brand {
+  min-height: 44px;
+}
+.role-access {
+  display: block;
+  margin: 4px auto 0;
+}
+.private-briefing .role-title,
+.private-briefing .role-note,
+.private-briefing .role-label {
+  display: block;
+  margin-block: 12px;
+}
+/* A visible boundary is needed for inputs even over the brightest glass. */
+input:not([type='range']),
+textarea,
+select {
+  border-color: #8096b4;
+}
+@media (prefers-contrast: more) {
+  .floating-nav,
+  .panel:not(.player-grid),
+  dialog,
+  .role-card,
+  .question-ideas,
+  .waiting-host {
+    background: #101e35;
+    border-color: #c3d3eb;
+    backdrop-filter: none;
+  }
+  :root {
+    --muted: #d4e1f4;
+  }
+}
+@media (forced-colors: active) {
+  button,
+  input,
+  select,
+  textarea,
+  dialog {
+    border: 1px solid ButtonText;
+  }
+  :focus-visible {
+    outline-color: Highlight;
+  }
+  .tabs [aria-selected='true'],
+  .vote-button[aria-pressed='true'] {
+    outline: 2px solid Highlight;
+    outline-offset: -3px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

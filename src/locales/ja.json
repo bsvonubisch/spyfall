@@ -358,7 +358,10 @@
     "Correct spy guess": "スパイが正解",
     "One minute left": "残り1分",
     "Time up / round end": "時間切れ／ラウンド終了",
-    "Recorded events by language. Older events have no language recorded.": "言語別の記録済みイベント数です。過去のイベントには言語が記録されていません。"
+    "Recorded events by language. Older events have no language recorded.": "言語別の記録済みイベント数です。過去のイベントには言語が記録されていません。",
+    "Skip to content": "本文へ移動",
+    "Read your role": "自分の役割を読む",
+    "Your role": "あなたの役割"
   },
   "locations": {
     "Airport": "空港",
