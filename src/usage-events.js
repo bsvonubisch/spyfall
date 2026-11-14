@@ -4,5 +4,5 @@ export const USAGE_EVENTS = {
   round_ended: 'Host-ended rounds', round_cancelled: 'Cancelled rounds', room_left: 'Room exits',
   rules_saved: 'Rules saved', profile_saved: 'Profiles updated', google_signin: 'Google sign-ins',
   invite_copied: 'Invites copied', role_revealed: 'Role reveals', question_idea: 'Question ideas',
-  leaderboard_opened: 'Leaderboard views', location_set: 'Location set changes'
+  leaderboard_opened: 'Leaderboard views', location_set: 'Location set changes', language_changed: 'Language changes'
 };

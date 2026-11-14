@@ -2,6 +2,7 @@ import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from './firebase.js';
 
 import { USAGE_EVENTS } from './usage-events.js';
+import { getLanguage } from './i18n.js';
 const sessionId = crypto.randomUUID();
 const storageKey = 'spyfall-usage-queue';
 let queue = [], flushing = false, retryTimer, activeUid = null, presenceId = null, roomCode = '', screen = 'home';
@@ -13,7 +14,7 @@ export function trackUsage(type, detail = {}) {
   if (!uid || !USAGE_EVENTS[type]) return;
   queue.push({ id: crypto.randomUUID(), type, uid, sessionId, screen: detail.screen || screen,
     roomCode: detail.roomCode ?? roomCode, roundId: Number(detail.roundId) || 0,
-    device: matchMedia('(max-width: 650px)').matches ? 'mobile' : 'desktop' });
+    language: getLanguage(), device: matchMedia('(max-width: 650px)').matches ? 'mobile' : 'desktop' });
   queue = queue.slice(-200); persist(); void flushUsage();
 }
 async function flushUsage() {

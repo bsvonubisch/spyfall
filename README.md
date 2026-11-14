@@ -172,7 +172,20 @@ Rooms accept changes for 24 hours. Old rooms are not automatically deleted: peri
 
 ## Repository layout
 
+### Translations
+
+The footer language picker changes only the current browser’s display and remembers the choice locally. English, German, French, Russian, Mandarin (Simplified Chinese), Japanese, Dutch, Arabic, Spanish, and Italian are supported. Arabic uses a right-to-left layout. Players can use different languages in the same room, and switching language does not reset the round or change anyone else’s screen.
+
+Each language has an editable JSON file in `src/locales/` (`en.json`, `de.json`, `fr.json`, `ru.json`, `zh.json`, `ja.json`, `nl.json`, `ar.json`, `es.json`, `it.json`). Each contains `ui`, `locations`, and `questions` sections. English strings are the stable lookup keys; translate the values and preserve every `{placeholder}`. Only the selected additional language is downloaded. The tests check completeness and placeholders against English.
+
+Firestore field names, event types, statuses, built-in locations, secret locations, and guesses remain canonical English. Translated location labels are converted back before saving settings or submitting guesses. Names and custom locations are user content and are not automatically translated; hosts are prompted to enter custom places in English. Unknown custom places display exactly as entered. No translation API or paid backend is used.
+
+New usage events include a validated `language` code, and switching languages records `language_changed`. The admin area shows event counts by selected language. Older events remain valid but have no recorded language and are excluded from that breakdown; their language cannot be reliably backfilled.
+
+### Source files
+
 - `src/app.js` — screens, QR invitations, live subscriptions, and interactions.
+- `src/i18n.js`, `src/locales/`, `src/localization.css` — local language preference, translation catalogs, and RTL layout.
 - `src/game.js` — Firestore transactions and game flow.
 - `src/scores.js` — profiles, verified results, and idempotent leaderboard awards.
 - `src/account.js` — anonymous-to-Google linking and account switching.

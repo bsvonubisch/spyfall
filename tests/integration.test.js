@@ -11,6 +11,7 @@ import { getAuth, connectAuthEmulator, signInAnonymously, linkWithCredential, Go
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { execute, DEFAULT_SETTINGS, resolveResult, eligiblePlayers, threshold } from '../src/game.js';
 import { membershipState } from '../src/room-view.js';
+import { LANGUAGES, setLanguage, locationName, canonicalLocation, locationInputValue } from '../src/i18n.js';
 
 let env;
 const db = id => env.authenticatedContext(id).firestore();
@@ -32,6 +33,48 @@ async function start(code) {
 const ownerClaims = { admin: true, email: 'owner@example.com', email_verified: true, firebase: { sign_in_provider: 'google.com', identities: { 'google.com': ['owner-google-id'] } } };
 const ownerDb = () => env.authenticatedContext('owner', ownerClaims).firestore();
 const usageEvent = (uid = 'p0') => ({ uid, type: 'visit', sessionId: crypto.randomUUID(), screen: 'home', roomCode: '', roundId: 0, device: 'mobile', source: 'client', createdAt: serverTimestamp() });
+
+test('mixed-language clients save, receive, and guess the same canonical English locations', async () => {
+  try {
+    const code = await lobby(2);
+    await setLanguage('fr');
+    const locations = DEFAULT_SETTINGS.locations.map(canonical => {
+      const label = locationName(canonical);
+      return locationInputValue({ value: label, dataset: { canonical, label } });
+    });
+    await execute(db('p0'), 'p0', { action: 'settings', code, settings: { ...DEFAULT_SETTINGS, locations } });
+    assert.deepEqual((await getDoc(doc(db('p0'), 'profiles', 'p0', 'preferences', 'game'))).data().locations, DEFAULT_SETTINGS.locations);
+    const before = (await getDoc(doc(db('p0'), 'rooms', code))).data();
+    await setLanguage('ar');
+    assert.deepEqual((await getDoc(doc(db('p1'), 'rooms', code))).data(), before, 'changing a local language never changes the room');
+    const { room, spy, civilian } = await start(code);
+    assert.ok(DEFAULT_SETTINGS.locations.includes(civilian.location));
+    assert.equal(spy.location, null);
+    await setLanguage('ja');
+    const guess = canonicalLocation(locationName(civilian.location));
+    await execute(db(spy.id), spy.id, { action: 'guess', code, roundId: room.roundId, location: guess });
+    const ended = (await getDoc(doc(db(spy.id), 'rooms', code))).data();
+    const secret = (await getDoc(doc(db(spy.id), 'rooms', code, 'secrets', 'current'))).data();
+    assert.equal(ended.result.guess, civilian.location);
+    assert.equal(resolveResult(ended.result, secret).winner, 'spy');
+    assert.deepEqual(ended.settings.locations, DEFAULT_SETTINGS.locations);
+  } finally { await setLanguage('en'); }
+});
+
+test('language analytics accept supported codes, remain private, and preserve older clients', async () => {
+  const event = usageEvent();
+  await assertSucceeds(setDoc(doc(db('p0'), 'usage', 'legacy'), event));
+  for (const { code } of LANGUAGES) {
+    const ref = doc(db('p0'), 'usage', `language-${code}`);
+    await assertSucceeds(setDoc(ref, { ...event, type: 'language_changed', language: code }));
+    assert.equal((await getDoc(ref)).data().language, code);
+    await assertFails(getDoc(doc(db('p1'), 'usage', `language-${code}`)));
+  }
+  for (const language of ['xx', 'German', null, {}, 'fr<script>']) await assertFails(setDoc(doc(db('p0'), 'usage', crypto.randomUUID()), { ...event, language }));
+  const stats = await loadAdminStats(ownerDb());
+  assert.equal(stats.usage.find(item => item.type === 'language_changed').count, LANGUAGES.length);
+  assert.deepEqual(stats.languages.map(item => [item.code, item.events]), LANGUAGES.map(item => [item.code, 1]));
+});
 
 test('linking a Google identity retains the guest UID, profile, and saved locations; existing accounts can be restored', async () => {
   const app = initializeApp({ apiKey: 'demo-key', projectId: 'demo-spyfall' }, crypto.randomUUID());

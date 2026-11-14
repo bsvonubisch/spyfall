@@ -33,15 +33,16 @@ service cloud.firestore {
       allow get: if admin() || signedIn() && resource.data.uid == uid();
       allow list: if admin();
       allow create: if signedIn()
-        && request.resource.data.keys().hasOnly(['type','uid','sessionId','screen','roomCode','roundId','device','source','createdAt'])
+        && request.resource.data.keys().hasOnly(['type','uid','sessionId','screen','roomCode','roundId','device','language','source','createdAt'])
         && request.resource.data.uid == uid() && request.resource.data.source == 'client'
         && request.resource.data.createdAt == request.time
         && request.resource.data.sessionId is string && request.resource.data.sessionId.matches('^[a-f0-9-]{36}$')
         && request.resource.data.screen in ['home','lobby','round','result','loading']
         && request.resource.data.device in ['mobile','desktop']
+        && request.resource.data.get('language', 'en') in ['en','de','fr','ru','zh','ja','nl','ar','es','it']
         && request.resource.data.roomCode is string && request.resource.data.roomCode.matches('^([A-Z2-9]{6})?$')
         && request.resource.data.roundId is int && request.resource.data.roundId >= 0
-        && request.resource.data.type in ['visit','screen_view','room_created','room_joined','round_started','vote_cast','guess_submitted','round_ended','round_cancelled','room_left','rules_saved','profile_saved','google_signin','invite_copied','role_revealed','question_idea','leaderboard_opened','location_set'];
+        && request.resource.data.type in ['visit','screen_view','room_created','room_joined','round_started','vote_cast','guess_submitted','round_ended','round_cancelled','room_left','rules_saved','profile_saved','google_signin','invite_copied','role_revealed','question_idea','leaderboard_opened','location_set','language_changed'];
     }
     match /presence/{session} {
       allow get: if admin() || signedIn() && resource.data.uid == uid();

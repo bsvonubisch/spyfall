@@ -1,0 +1,2 @@
+// A JavaScript entry keeps lazy JSON loading compatible with Vite and Node.
+export { default } from './zh.json' with { type: 'json' };

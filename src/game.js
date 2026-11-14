@@ -12,7 +12,7 @@ export const eligiblePlayers = room => room.memberIds.filter(id => !(room.caught
 const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 function random(n) { const values = new Uint32Array(1); const limit = Math.floor(2 ** 32 / n) * n; do { crypto.getRandomValues(values); } while (values[0] >= limit); return values[0] % n; }
 export const threshold = room => { const n = eligiblePlayers(room).length; return n === 2 ? 1 : room.settings.voting === 'unanimous' ? n - 1 : Math.floor(n / 2) + 1; };
-function check(condition, message) { if (!condition) throw new Error(message); }
+function check(condition, message, i18n) { if (!condition) { const error = new Error(message); if (i18n) error.i18n = i18n; throw error; } }
 export function validSettings(value) {
   check(Number.isInteger(value?.minutes) && value.minutes >= 2 && value.minutes <= 20, 'Choose 2–20 minutes.');
   check(['majority', 'unanimous'].includes(value.voting), 'Choose a voting rule.');
@@ -110,7 +110,7 @@ async function executeOnce(db, uid, data) {
       tx.set(doc(db, 'profiles', uid, 'preferences', 'game'), { locations: settings.locations, updatedAt: serverTimestamp() });
     } else if (type === 'start') {
       const spies = room.settings.spies ?? 1;
-      check(room.status === 'lobby' && room.memberIds.length >= requiredPlayers(spies), `At least ${requiredPlayers(spies)} players are needed for ${spies} ${spies === 1 ? 'spy' : 'spies'}.`);
+      check(room.status === 'lobby' && room.memberIds.length >= requiredPlayers(spies), `At least ${requiredPlayers(spies)} players are needed for ${spies} ${spies === 1 ? 'spy' : 'spies'}.`, { key: 'At least {count} players are needed ({spies}).', values: { count: requiredPlayers(spies), spies } });
       const candidates = [...room.memberIds], spyIds = [];
       while (spyIds.length < spies) spyIds.push(candidates.splice(random(candidates.length), 1)[0]);
       const secret = { spyIds, location: room.settings.locations[random(room.settings.locations.length)], roundId: room.roundId + 1 };

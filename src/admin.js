@@ -1,10 +1,11 @@
 import { collection, getCountFromServer, getDocs, query, where, orderBy, limit, Timestamp, onSnapshot } from 'firebase/firestore';
 import { USAGE_EVENTS } from './usage-events.js';
+import { LANGUAGES } from './i18n.js';
 
 // Read on demand; no background listeners or paid server are required.
 export async function loadAdminStats(db, now = Date.now()) {
   const profiles = collection(db, 'profiles'), rooms = collection(db, 'rooms'), results = collection(db, 'results');
-  const [players, rounds, weekly, dailyRooms, latestRooms, leaders, usageCounts, days] = await Promise.all([
+  const [players, rounds, weekly, dailyRooms, latestRooms, leaders, usageCounts, days, languages] = await Promise.all([
     getCountFromServer(profiles),
     getCountFromServer(results),
     getCountFromServer(query(results, where('completedAt', '>=', Timestamp.fromMillis(now - 7 * 86400000)))),
@@ -17,14 +18,17 @@ export async function loadAdminStats(db, now = Date.now()) {
       const end = new Date(start); end.setDate(end.getDate() + 1);
       const count = await getCountFromServer(query(collection(db, 'usage'), where('createdAt', '>=', Timestamp.fromDate(start)), where('createdAt', '<', Timestamp.fromDate(end))));
       return { date: start.getTime(), count: count.data().count };
-    }))
+    })),
+    Promise.all(LANGUAGES.map(async language => ({ ...language,
+      events: (await getCountFromServer(query(collection(db, 'usage'), where('language', '==', language.code)))).data().count
+    })))
   ]);
   return {
     players: players.data().count, rounds: rounds.data().count,
     weekly: weekly.data().count, dailyRooms: dailyRooms.data().count,
     rooms: latestRooms.docs.map(doc => ({ code: doc.id, ...doc.data() })),
     leaders: leaders.docs.map(doc => doc.data()).filter(player => player.gamesPlayed > 0),
-    usage: usageCounts, days, loadedAt: now
+    usage: usageCounts, days, languages, loadedAt: now
   };
 }
 

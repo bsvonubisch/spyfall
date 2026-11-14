@@ -1,0 +1,33 @@
+/* Language controls share the footer without exposing the admin entry point. */
+.language-picker { display: flex; justify-content: center; align-items: center; gap: 10px; margin: 8px auto 0; font-size: 11px; letter-spacing: 0; color: var(--muted); }
+.language-picker select { width: auto; max-width: 190px; min-height: 44px; padding: 8px 12px; border: 1px solid #d9e8ff25; border-radius: 12px; background-color: #dae9ff0b; font-size: 12px; }
+.language-picker select:disabled { opacity: .5; }
+.language-hint { margin: 4px 0 0; font-size: 10px; color: var(--muted); }
+.language-usage .usage-row { gap: 16px; }
+.language-usage .usage-row span { overflow-wrap: anywhere; }
+.tabs button { min-width: 0; overflow-wrap: anywhere; }
+.section-heading { flex-wrap: wrap; }
+.section-heading h2, .section-heading > span { min-width: 0; }
+.facts { flex-wrap: wrap; }
+.button { overflow-wrap: anywhere; }
+.result-title { overflow-wrap: anywhere; font-size: clamp(32px, 10vw, 48px); }
+.room-code, .room-tag, #timer { direction: ltr; unicode-bidi: isolate; }
+bdi { unicode-bidi: isolate; }
+:lang(ar) { letter-spacing: normal; font-family: 'Segoe UI', Tahoma, Arial, sans-serif; }
+:lang(ar) .hero h1 { line-height: 1.25; }
+:lang(ar) .eyebrow, :lang(ar) label { letter-spacing: normal; }
+[dir=rtl] .role-card, [dir=rtl] .role-trigger { text-align: start; }
+[dir=rtl] .nav-actions { margin-left: 0; margin-right: auto; }
+[dir=rtl] .settings select { background-position: left 14px center; padding-left: 40px; padding-right: 14px; }
+[dir=rtl] .settings output { float: left; }
+[dir=rtl] .name-field input { padding-left: 58px; padding-right: 14px; }
+[dir=rtl] .input-account { right: auto; left: 7px; }
+[dir=rtl] .player-grid .remove { right: auto; left: -3px; padding: 0 15px 15px 0; }
+[dir=rtl] .player-grid .vote-button > svg { right: auto; left: 7px; }
+[dir=rtl] .button > svg:last-child { right: auto; left: 16px; }
+[dir=rtl] .button > svg:last-child, [dir=rtl] [data-action=more-questions] svg { transform: scaleX(-1); }
+@media (max-width: 350px) {
+  .language-picker { flex-wrap: wrap; }
+  .invite { gap: 8px; }
+  .invite .text-button { overflow-wrap: anywhere; }
+}

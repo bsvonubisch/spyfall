@@ -1,7 +1,9 @@
 import './style.css';
 import './game-table.css';
+import './localization.css';
 import { renderHtml, appendHtml, escapeHtml as esc } from './render-html.js';
 import QRCode from 'qrcode';
+import { t, LANGUAGES, getLanguage, preferredLanguage, setLanguage, applyDocumentLanguage, locationName, locationInputValue, canonicalLocation, questionText, formatDate, formatNumber } from './i18n.js';
 import { doc, onSnapshot, getDoc, getDocs, collection, query, orderBy, limit } from 'firebase/firestore';
 import { onIdTokenChanged } from 'firebase/auth';
 import { normalizeRoom, resolveResult, threshold, eligiblePlayers, requiredPlayers, MAX_PLAYERS, MAX_SPIES } from './game.js';
@@ -22,14 +24,14 @@ import { startUsage, stopUsage, trackUsage, usageScreen } from './usage.js';
 
 const $ = selector => document.querySelector(selector);
 bindDialogViewport($('#confirm'));
-const icon = (name, size = 20) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${({eye:'<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',arrow:'<path d="M4 12h16m-6-6 6 6-6 6"/>',plus:'<path d="M12 5v14M5 12h14"/>',users:'<circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2m1-15a3 3 0 0 1 0 6m2 3a5 5 0 0 1 3 4v2"/>',clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',lock:'<rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',check:'<path d="m5 12 4 4L19 6"/>',copy:'<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/>',pin:'<path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 0 1 14 0Z"/><circle cx="12" cy="10" r="2"/>',exit:'<path d="M9 4H4v16h5m5-12 4 4-4 4m-5-4h11"/>'})[name] || ''}</svg>`;
+const icon = (name, size = 20) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${({eye:`<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>`,arrow:`<path d="M4 12h16m-6-6 6 6-6 6"/>`,plus:`<path d="M12 5v14M5 12h14"/>`,users:`<circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2m1-15a3 3 0 0 1 0 6m2 3a5 5 0 0 1 3 4v2"/>`,clock:`<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>`,lock:`<rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>`,check:`<path d="m5 12 4 4L19 6"/>`,copy:`<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/>`,pin:`<path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 0 1 14 0Z"/><circle cx="12" cy="10" r="2"/>`,exit:`<path d="M9 4H4v16h5m5-12 4 4-4 4m-5-4h11"/>`})[name] || ''}</svg>`;
 const initialRoomCode = new URLSearchParams(location.search).get('room')?.toUpperCase() || '';
 const state = { code: initialRoomCode, room: null, role: null, uid: null, tab: 'players', reveal: false, busy: false, loading: false, draft: null, stops: [], clockOffset: 0 };
 let savedName = '';
 let ownProfile = null, accountChanging = false, adminStats = null;
 let profileIdentity = '';
 const accountIdentity = user => user ? `${user.uid}:${googleAccount(user)}` : '';
-const googleLogo = '<img class="google-logo" src="/google-icon.svg" width="40" height="40" alt="" aria-hidden="true">';
+const googleLogo = `<img class="google-logo" src="/google-icon.svg" width="40" height="40" alt="" aria-hidden="true">`;
 let stopAdminLive = null;
 $('#confirm').addEventListener('close', () => { stopAdminLive?.(); stopAdminLive = null; });
 let stopRole = null;
@@ -57,7 +59,7 @@ async function showLeaderboard(scope = state.room ? 'room' : 'overall') {
   trackUsage('leaderboard_opened');
   const dialog = $('#confirm'), code = state.code;
   const roomAvailable = Boolean(state.room);
-  renderHtml(dialog, `<h2>Leaderboards</h2><div class="tabs score-tabs" role="tablist" aria-label="Leaderboard">${roomAvailable ? `<button role="tab" data-scope="room" aria-selected="${scope === 'room'}">This room</button>` : ''}<button role="tab" data-scope="overall" aria-selected="${scope === 'overall'}">Overall</button></div><div id="scores-content" aria-live="polite"><p>Loading standings…</p></div><button class="button quiet full" id="close-scores">Close</button>`);
+  renderHtml(dialog, `<h2>${t("Leaderboards")}</h2><div class="tabs score-tabs" role="tablist" aria-label="${t("Leaderboard")}">${roomAvailable ? `<button role="tab" data-scope="room" aria-selected="${scope === 'room'}">${t("This room")}</button>` : ''}<button role="tab" data-scope="overall" aria-selected="${scope === 'overall'}">${t("Overall")}</button></div><div id="scores-content" aria-live="polite"><p>${t("Loading standings…")}</p></div><button class="button quiet full" id="close-scores">${t("Close")}</button>`);
   if (!dialog.open) dialog.showModal();
   $('#close-scores').onclick = () => dialog.close();
   dialog.querySelectorAll('[data-scope]').forEach(button => { button.onclick = () => { void showLeaderboard(button.dataset.scope).catch(reportError); }; });
@@ -75,15 +77,15 @@ async function showLeaderboard(scope = state.room ? 'room' : 'overall') {
     }));
     if (!dialog.open || $('#scores-content') !== content) return;
     let rank = 0;
-    const row = (p, position) => `<div class="score-row ${p.id === user.uid ? 'your-score' : ''}"><span class="score-rank">${position}</span><span class="avatar portrait">${playerAvatar(p)}</span><span class="score-name">${esc(scope === 'room' ? state.room?.players.find(player => player.id === p.id)?.name || p.name : p.name)}${p.id === user.uid ? ' <small>(you)</small>' : ''}<small>${p.gamesPlayed} ${p.gamesPlayed === 1 ? 'round' : 'rounds'} · ${Math.round(p.wins / p.gamesPlayed * 100)}% wins</small></span><strong>${p.wins}<small>${p.wins === 1 ? 'point' : 'points'}</small></strong></div>`;
-    renderHtml(content, `<p class="score-explainer">1 point per team win. Every completed round counts.</p>${entries.length ? `<div class="score-list">${entries.map((p, i) => { if (!i || p.wins !== entries[i - 1].wins) rank = i + 1; return row(p, rank); }).join('')}</div>` : '<p class="score-empty">No scores yet. Finish a round to get on the board.</p>'}${own.exists() && own.data().gamesPlayed && !entries.some(p => p.id === user.uid) ? `<p class="fineprint">Your total</p>${row(own.data(), '—')}` : ''}<p class="fineprint score-identity">${scope === 'overall' ? 'Top 25 players. ' : ''}${googleAccount(user) ? 'Your profile follows your Google account.' : 'Your guest profile belongs to this browser. Connect Google from your profile to keep it across devices.'}</p>`);
+    const row = (p, position) => `<div class="score-row ${p.id === user.uid ? 'your-score' : ''}"><span class="score-rank">${position}</span><span class="avatar portrait">${playerAvatar(p)}</span><span class="score-name">${esc(scope === 'room' ? state.room?.players.find(player => player.id === p.id)?.name || p.name : p.name)}${p.id === user.uid ? ` <small>${t("(you)")}</small>` : ''}<small>${t('Rounds: {count} · Wins: {percent}%', { count: p.gamesPlayed, percent: Math.round(p.wins / p.gamesPlayed * 100) })}</small></span><strong>${t('Points: {count}', { count: p.wins })}</strong></div>`;
+    renderHtml(content, `<p class="score-explainer">${t("1 point per team win. Every completed round counts.")}</p>${entries.length ? `<div class="score-list">${entries.map((p, i) => { if (!i || p.wins !== entries[i - 1].wins) rank = i + 1; return row(p, rank); }).join('')}</div>` : `<p class="score-empty">${t("No scores yet. Finish a round to get on the board.")}</p>`}${own.exists() && own.data().gamesPlayed && !entries.some(p => p.id === user.uid) ? `<p class="fineprint">${t("Your total")}</p>${row(own.data(), '—')}` : ''}<p class="fineprint score-identity">${scope === 'overall' ? t("Top 25 players. ") : ''}${googleAccount(user) ? t("Your profile follows your Google account.") : t("Your guest profile belongs to this browser. Connect Google from your profile to keep it across devices.")}</p>`);
   } catch (error) {
-    if ($('#scores-content') === content) renderHtml(content, `<p>${esc(errorMessage(error))}</p><button class="button secondary full" id="retry-scores">Try again</button>`);
+    if ($('#scores-content') === content) renderHtml(content, `<p>${esc(errorMessage(error))}</p><button class="button secondary full" id="retry-scores">${t("Try again")}</button>`);
     $('#retry-scores')?.addEventListener('click', () => { void showLeaderboard(scope).catch(reportError); });
   }
 }
 const inRound = r => ['active', 'accusing'].includes(r?.status);
-const spyLabel = count => `${count} ${count === 1 ? 'spy' : 'spies'}`;
+const spyLabel = count => t('Spies: {count}', { count });
 try { savedName = localStorage.getItem('spyfall-name') || ''; } catch {}
 
 function rememberName(name) {
@@ -112,8 +114,8 @@ async function completeGoogleSession(user) {
 }
 async function signInGoogle(source = 'account') {
   if (accountChanging || state.busy) return;
-  if (!auth.currentUser) { notice('Your guest profile is still connecting. Try again in a moment.'); return; }
-  if (!canChangeAccount()) { notice('Return to the lobby before connecting a Google account.'); return; }
+  if (!auth.currentUser) { notice(t("Your guest profile is still connecting. Try again in a moment.")); return; }
+  if (!canChangeAccount()) { notice(t("Return to the lobby before connecting a Google account.")); return; }
   accountChanging = true;
   state.busy = true;
   const request = connectGoogle();
@@ -122,7 +124,7 @@ async function signInGoogle(source = 'account') {
     const result = await request;
     if (result.credential) {
       const dialog = $('#confirm');
-      renderHtml(dialog, '<h2>Use your saved Google profile?</h2><p>This account already has a profile. Switching will leave this room. Your guest scores and saved locations stay with the guest profile; they will not be merged.</p><button class="button primary full" id="switch-account">Use Google profile</button><button class="button quiet full" id="keep-guest">Keep playing as guest</button>');
+      renderHtml(dialog, `<h2>${t("Use your saved Google profile?")}</h2><p>${t("This account already has a profile. Switching will leave this room. Your guest scores and saved locations stay with the guest profile; they will not be merged.")}</p><button class="button primary full" id="switch-account">${t("Use Google profile")}</button><button class="button quiet full" id="keep-guest">${t("Keep playing as guest")}</button>`);
       if (!dialog.open) dialog.showModal();
       $('#keep-guest').onclick = () => dialog.close();
       $('#switch-account').onclick = () => {
@@ -134,7 +136,7 @@ async function signInGoogle(source = 'account') {
             stopUsage(); disconnect(); state.code = ''; history.replaceState(null, '', '/');
             await completeGoogleSession(await useGoogleAccount(result.credential));
             if (source !== 'home') await showAccount();
-            else notice('Google connected. Your profile is ready.');
+            else notice(t("Google connected. Your profile is ready."));
           } finally { accountChanging = false; }
         });
       };
@@ -143,7 +145,7 @@ async function signInGoogle(source = 'account') {
     await completeGoogleSession(result.user);
     if (source === 'profile') showProfileEditor();
     else if (source !== 'home') await showAccount();
-    else notice('Google connected. Your profile is ready.');
+    else notice(t("Google connected. Your profile is ready."));
   } catch (error) { notice(error.code?.startsWith('auth/') ? accountError(error) : errorMessage(error)); if (source !== 'home') await showAccount(); }
   finally { accountChanging = false; state.busy = false; render(); $('#confirm').querySelectorAll('button').forEach(button => { button.disabled = false; }); }
 }
@@ -154,7 +156,7 @@ async function showAccount(checkAdmin = true) {
   if (allowed) return showAdmin();
   concealRole();
   const connected = googleAccount(user), editable = canChangeAccount(), dialog = $('#confirm');
-  renderHtml(dialog, `<span class="eyebrow">YOUR ACCOUNT</span><h2>${connected ? 'Welcome back.' : 'Keep your identity.'}</h2><p>${connected ? `Signed in as ${esc(user.email)}. Your profile and saved locations follow your Google account.` : 'Guest play stays free and needs no account. Connect Google to keep your profile, scores, and saved locations across devices.'}</p>${connected ? `<button class="button secondary full" id="account-profile" ${!editable ? 'disabled' : ''}>Edit profile</button><button class="button quiet full" id="account-signout" ${!editable ? 'disabled' : ''}>Sign out</button>` : `<button class="button google-signin full" data-login-google ${!editable ? 'disabled' : ''}>${googleLogo} Continue with Google</button>`}${!editable ? '<p class="fineprint">Return to the lobby to change your account or profile.</p>' : ''}<button class="button quiet full" id="close-account">${connected ? 'Close' : 'Keep playing as guest'}</button>`);
+  renderHtml(dialog, `<span class="eyebrow">${t("YOUR ACCOUNT")}</span><h2>${connected ? t("Welcome back.") : t("Keep your identity.")}</h2><p>${connected ? t("Signed in as {v0}. Your profile and saved locations follow your Google account.", { v0: esc(user.email) }) : t("Guest play stays free and needs no account. Connect Google to keep your profile, scores, and saved locations across devices.")}</p>${connected ? `<button class="button secondary full" id="account-profile" ${!editable ? 'disabled' : ''}>${t("Edit profile")}</button><button class="button quiet full" id="account-signout" ${!editable ? 'disabled' : ''}>${t("Sign out")}</button>` : `<button class="button google-signin full" data-login-google ${!editable ? 'disabled' : ''}>${googleLogo} ${t("Continue with Google")}</button>`}${!editable ? `<p class="fineprint">${t("Return to the lobby to change your account or profile.")}</p>` : ''}<button class="button quiet full" id="close-account">${connected ? t("Close") : t("Keep playing as guest")}</button>`);
   if (!dialog.open) dialog.showModal();
   $('#close-account').onclick = () => dialog.close();
   $('[data-login-google]')?.addEventListener('click', () => { void signInGoogle().catch(reportError); });
@@ -162,9 +164,9 @@ async function showAccount(checkAdmin = true) {
   $('#account-signout')?.addEventListener('click', signOutAccount);
 }
 function signOutAccount() {
-  if (!canChangeAccount()) return notice('Return to the lobby before signing out.');
+  if (!canChangeAccount()) return notice(t("Return to the lobby before signing out."));
   $('#confirm').close();
-  confirmAction('Sign out?', state.room ? 'You will leave this room and continue as a new guest. Your Google profile, scores, and saved locations remain saved.' : 'You will continue as a new guest. Your Google profile, scores, and saved locations remain saved.', 'Sign out', async () => {
+  confirmAction(t("Sign out?"), state.room ? t("You will leave this room and continue as a new guest. Your Google profile, scores, and saved locations remain saved.") : t("You will continue as a new guest. Your Google profile, scores, and saved locations remain saved."), t("Sign out"), async () => {
     accountChanging = true;
     try {
       if (state.room) await action('leave');
@@ -182,7 +184,7 @@ async function showAdmin(force = false) {
   concealRole();
   const dialog = $('#confirm');
   stopAdminLive?.();
-  renderHtml(dialog, `<div class="section-heading"><span class="eyebrow">ADMIN AREA</span><button class="text-button" id="refresh-admin">Refresh</button></div><h2>The whole game.</h2><div id="admin-live" class="admin-live" aria-live="polite">Connecting to live activity…</div><p class="fineprint">Live means a visible app checked in during the last 3 minutes. Multiple tabs count as one player.</p><section class="admin-sounds" aria-labelledby="sound-tests-heading"><h3 id="sound-tests-heading">Sound check</h3><div class="sound-test-grid">${SOUND_PREVIEWS.map(cue => `<button type="button" class="button outline" data-preview-sound="${cue.id}">${cue.label}</button>`).join('')}</div><p class="fineprint" id="sound-preview-status" role="status">Preview sounds on this device.</p></section><div id="admin-content" aria-live="polite"><p>Loading game stats…</p></div><button class="button primary full" id="close-admin">Back to game</button><button class="button quiet full" id="admin-signout">Sign out</button>`);
+  renderHtml(dialog, `<div class="section-heading"><span class="eyebrow">${t("ADMIN AREA")}</span><button class="text-button" id="refresh-admin">${t("Refresh")}</button></div><h2>${t("The whole game.")}</h2><div id="admin-live" class="admin-live" aria-live="polite">${t("Connecting to live activity…")}</div><p class="fineprint">${t("Live means a visible app checked in during the last 3 minutes. Multiple tabs count as one player.")}</p><section class="admin-sounds" aria-labelledby="sound-tests-heading"><h3 id="sound-tests-heading">${t("Sound check")}</h3><div class="sound-test-grid">${SOUND_PREVIEWS.map(cue => `<button type="button" class="button outline" data-preview-sound="${cue.id}">${t(cue.label)}</button>`).join('')}</div><p class="fineprint" id="sound-preview-status" role="status">${t("Preview sounds on this device.")}</p></section><div id="admin-content" aria-live="polite"><p>${t("Loading game stats…")}</p></div><button class="button primary full" id="close-admin">${t("Back to game")}</button><button class="button quiet full" id="admin-signout">${t("Sign out")}</button>`);
   if (!dialog.open) dialog.showModal();
   const content = $('#admin-content');
   $('#close-admin').onclick = () => dialog.close();
@@ -195,15 +197,15 @@ async function showAdmin(force = false) {
       button.disabled = true;
       try {
         const played = await previewSound(button.dataset.previewSound);
-        status.textContent = played ? `Playing: ${button.textContent}.` : soundEnabled() ? 'Audio is unavailable in this browser.' : 'Turn on Sound in the navigation to preview.';
-      } catch { status.textContent = 'Could not play this sound. Please try again.'; }
+        status.textContent = played ? t("Playing: {v0}.", { v0: button.textContent }) : soundEnabled() ? t("Audio is unavailable in this browser.") : t("Turn on Sound in the navigation to preview.");
+      } catch { status.textContent = t("Could not play this sound. Please try again."); }
       finally { button.disabled = false; }
     };
   });
   stopAdminLive = watchLiveStats(db, live => {
     if (!dialog.open || !$('#admin-live')) return;
-    renderHtml($('#admin-live'), `<span class="dot"></span><span><strong>${live.users}${live.capped ? '+' : ''}</strong> live players</span><span><strong>${live.rooms}${live.capped ? '+' : ''}</strong> live rooms</span>`);
-  }, () => { if ($('#admin-live')) $('#admin-live').textContent = 'Live activity is unavailable. Refresh to retry.'; });
+    renderHtml($('#admin-live'), `<span class="dot"></span><span><strong>${live.users}${live.capped ? '+' : ''}</strong> ${t("live players")}</span><span><strong>${live.rooms}${live.capped ? '+' : ''}</strong> ${t("live rooms")}</span>`);
+  }, () => { if ($('#admin-live')) $('#admin-live').textContent = t("Live activity is unavailable. Refresh to retry."); });
   try {
     if (force || !adminStats || Date.now() - adminStats.loadedAt > 60000) {
       await user.getIdToken(true);
@@ -211,23 +213,24 @@ async function showAdmin(force = false) {
     }
     if (!dialog.open || $('#admin-content') !== content || auth.currentUser?.uid !== user.uid) return;
     const stats = adminStats;
-    const metric = (label, value) => `<div class="admin-metric"><strong>${Number(value).toLocaleString()}</strong><span>${label}</span></div>`;
-    const status = room => Date.now() - room.createdAt.toMillis() > 86400000 ? 'Expired' : ({lobby:'Lobby',active:'Playing',accusing:'Voting',ended:'Finished'})[room.status] || room.status;
-    renderHtml(content, `<div class="admin-metrics">${metric('Player profiles', stats.players)}${metric('Completed rounds', stats.rounds)}${metric('Rounds · last 7 days', stats.weekly)}${metric('Recent rooms · 24 hours', stats.dailyRooms)}</div><p class="fineprint">Profiles include guests. Completed rounds come from saved results. Room counts exclude rooms deleted when the last player leaves.</p><h3>Recent rooms</h3><div class="admin-rooms">${stats.rooms.length ? stats.rooms.map(room => `<div class="admin-room"><strong>${esc(room.code)}</strong><span>${room.memberIds.length} players · ${esc(status(room))}</span><small>${room.createdAt.toDate().toLocaleDateString()}</small></div>`).join('') : '<p>No rooms yet.</p>'}</div><h3>Most active players</h3>${stats.leaders.length ? stats.leaders.map(player => `<div class="score-row"><span class="avatar portrait">${playerAvatar(player)}</span><span class="score-name">${esc(player.name)}<small>${player.gamesPlayed} rounds · ${player.wins} wins</small></span></div>`).join('') : '<p>No completed rounds yet.</p>'}<p class="fineprint">Updated ${new Date(stats.loadedAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}. Latest 12 rooms and top 5 players.</p>`);
+    const metric = (label, value) => `<div class="admin-metric"><strong>${formatNumber(Number(value))}</strong><span>${t(label)}</span></div>`;
+    const status = room => Date.now() - room.createdAt.toMillis() > 86400000 ? t("Expired") : ({lobby:t("Lobby"),active:t("Playing"),accusing:t("Voting"),ended:t("Finished")})[room.status] || room.status;
+    renderHtml(content, `<div class="admin-metrics">${metric(t("Player profiles"), stats.players)}${metric(t("Completed rounds"), stats.rounds)}${metric(t("Rounds · last 7 days"), stats.weekly)}${metric(t("Recent rooms · 24 hours"), stats.dailyRooms)}</div><p class="fineprint">${t("Profiles include guests. Completed rounds come from saved results. Room counts exclude rooms deleted when the last player leaves.")}</p><h3>${t("Recent rooms")}</h3><div class="admin-rooms">${stats.rooms.length ? stats.rooms.map(room => `<div class="admin-room"><strong>${esc(room.code)}</strong><span>${t("{v0} players · {v1}", { v0: room.memberIds.length, v1: esc(status(room)) })}</span><small>${formatDate(room.createdAt.toDate())}</small></div>`).join('') : `<p>${t("No rooms yet.")}</p>`}</div><h3>${t("Most active players")}</h3>${stats.leaders.length ? stats.leaders.map(player => `<div class="score-row"><span class="avatar portrait">${playerAvatar(player)}</span><span class="score-name">${esc(player.name)}<small>${t("{v0} rounds · {v1} wins", { v0: player.gamesPlayed, v1: player.wins })}</small></span></div>`).join('') : `<p>${t("No completed rounds yet.")}</p>`}<p class="fineprint">${t("Updated {v0}. Latest 12 rooms and top 5 players.", { v0: formatDate(stats.loadedAt, {hour:'2-digit',minute:'2-digit'}) })}</p>`);
+    appendHtml(content, `<section class="language-usage"><h3>${t('Language usage')}</h3><p class="fineprint">${t('Recorded events by language. Older events have no language recorded.')}</p>${stats.languages.map(language => `<div class="usage-row"><span lang="${language.code}" dir="auto">${esc(language.name)}</span><strong>${formatNumber(language.events)}</strong></div>`).join('')}</section>`);
     const peak = Math.max(1, ...stats.days.map(day => day.count));
-    appendHtml(content, `<h3>Activity · last 7 days</h3><div class="usage-chart" role="img" aria-label="Daily usage event counts">${stats.days.map(day => `<div class="usage-day"><strong>${day.count}</strong><i style="height:${Math.round(day.count / peak * 70)}px"></i><span>${new Date(day.date).toLocaleDateString([], {weekday:'short'})}</span></div>`).join('')}</div><h3>Usage totals</h3>${stats.usage.map(item => `<div class="usage-row"><span>${item.label}</span><strong>${item.count.toLocaleString()}</strong></div>`).join('')}<p class="fineprint">Usage events are recorded from this update onward. Recoverable room creations are backfilled; earlier visits, votes, and guesses were not recorded. Secret roles and answers are never included.</p>`);
+    appendHtml(content, `<h3>${t("Activity · last 7 days")}</h3><div class="usage-chart" role="img" aria-label="${t("Daily usage event counts")}">${stats.days.map(day => `<div class="usage-day"><strong>${day.count}</strong><i style="height:${Math.round(day.count / peak * 70)}px"></i><span>${formatDate(day.date, {weekday:'short'})}</span></div>`).join('')}</div><h3>${t("Usage totals")}</h3>${stats.usage.map(item => `<div class="usage-row"><span>${t(item.label)}</span><strong>${formatNumber(item.count)}</strong></div>`).join('')}<p class="fineprint">${t("Usage events are recorded from this update onward. Recoverable room creations are backfilled; earlier visits, votes, and guesses were not recorded. Secret roles and answers are never included.")}</p>`);
   } catch (error) {
-    if ($('#admin-content') === content) renderHtml(content, `<p>${esc(errorMessage(error))}</p><p class="fineprint">Admin access requires the verified owner’s Google account.</p>`);
+    if ($('#admin-content') === content) renderHtml(content, `<p>${esc(errorMessage(error))}</p><p class="fineprint">${t("Admin access requires the verified owner’s Google account.")}</p>`);
   }
 }
 function showProfileEditor() {
-  if (!canChangeAccount()) return notice('Profiles can be changed in the lobby.');
+  if (!canChangeAccount()) return notice(t("Profiles can be changed in the lobby."));
   const user = auth.currentUser;
   if (!user) { void showAccount().catch(reportError); return; }
   const dialog = $('#confirm'), player = ownProfile || state.room?.players.find(p => p.id === state.uid) || { id: user.uid, name: savedName || 'Agent' };
   const connected = googleAccount(user);
   let avatarSeed = player.avatarSeed || player.id, avatarUrl = connected ? googleProfile(user, player).avatarUrl : player.avatarUrl || '';
-  renderHtml(dialog, `<form id="rename-form"><h2>Your agent profile</h2><div class="avatar-editor"><span class="avatar portrait" id="profile-avatar">${playerAvatar({ ...player, avatarSeed, avatarUrl })}</span>${connected ? '<span class="fineprint">Google profile photo</span>' : '<button type="button" class="button secondary" id="regenerate-avatar">New avatar</button>'}</div><label for="player-name">NAME</label><input id="player-name" maxlength="20" required autocomplete="nickname" value="${esc(player.name)}">${connected ? `<p class="account-identity">Connected to ${esc(user.email)}</p>` : `<button type="button" class="button google-signin full profile-google" data-login-google>${googleLogo} Connect Google</button><p class="fineprint">Use your Google name and photo, and keep your profile across devices.</p>`}<button class="button primary full name-save" type="submit">Save profile ${icon('check')}</button><button class="button quiet full" type="button" id="cancel-name">Cancel</button></form>`);
+  renderHtml(dialog, `<form id="rename-form"><h2>${t("Your agent profile")}</h2><div class="avatar-editor"><span class="avatar portrait" id="profile-avatar">${playerAvatar({ ...player, avatarSeed, avatarUrl })}</span>${connected ? `<span class="fineprint">${t("Google profile photo")}</span>` : `<button type="button" class="button secondary" id="regenerate-avatar">${t("New avatar")}</button>`}</div><label for="player-name">${t("NAME")}</label><input id="player-name" maxlength="20" required autocomplete="nickname" value="${esc(player.name)}">${connected ? `<p class="account-identity">${t("Connected to {v0}", { v0: esc(user.email) })}</p>` : `<button type="button" class="button google-signin full profile-google" data-login-google>${googleLogo} ${t("Connect Google")}</button><p class="fineprint">${t("Use your Google name and photo, and keep your profile across devices.")}</p>`}<button class="button primary full name-save" type="submit">${t("Save profile")} ${icon('check')}</button><button class="button quiet full" type="button" id="cancel-name">${t("Cancel")}</button></form>`);
   if (!dialog.open) dialog.showModal();
   $('#regenerate-avatar')?.addEventListener('click', () => { avatarSeed = crypto.randomUUID(); avatarUrl = ''; renderHtml($('#profile-avatar'), avatar(avatarSeed)); });
   $('[data-login-google]')?.addEventListener('click', () => { void signInGoogle('profile').catch(reportError); });
@@ -240,35 +243,35 @@ function showProfileEditor() {
     void run(async () => {
       if (state.room) await action('rename', { name, avatarSeed, avatarUrl });
       else await updateProfile(db, user.uid, { name, avatarSeed, avatarUrl });
-      rememberName(name); await refreshProfile(user); trackUsage('profile_saved'); notice('Profile saved.');
+      rememberName(name); await refreshProfile(user); trackUsage('profile_saved'); notice(t("Profile saved."));
     });
   };
 }
 
 let noticeTimer;
-function notice(message) { clearTimeout(noticeTimer); $('#notice').textContent = message; $('#notice').hidden = !message; if (message) noticeTimer = setTimeout(() => { $('#notice').hidden = true; }, 8000); }
+function notice(message) { clearTimeout(noticeTimer); $('#notice').textContent = t(message); $('#notice').hidden = !message; if (message) noticeTimer = setTimeout(() => { $('#notice').hidden = true; }, 8000); }
 function errorMessage(error) {
-  if (error.code?.startsWith('auth/')) return 'Could not sign in. Check your connection and that anonymous sign-in is enabled in Firebase.';
-  if (['functions/unavailable', 'functions/internal'].includes(error.code)) return 'The game server is unavailable. Please try again shortly.';
-  if (error.code === 'permission-denied') return 'That action wasn’t allowed. The round may have changed; check your connection and try again.';
-  return error.message || 'Something went wrong. Please try again.';
+  if (error.code?.startsWith('auth/')) return t("Could not sign in. Check your connection and that anonymous sign-in is enabled in Firebase.");
+  if (['functions/unavailable', 'functions/internal'].includes(error.code)) return t("The game server is unavailable. Please try again shortly.");
+  if (error.code === 'permission-denied') return t("That action wasn’t allowed. The round may have changed; check your connection and try again.");
+  return error.i18n ? t(error.i18n.key, { ...error.i18n.values, spies: spyLabel(error.i18n.values.spies) }) : t(error.message || 'Something went wrong. Please try again.');
 }
 function reportError(error) { notice(errorMessage(error)); }
 function header() {
   const r = state.room, active = inRound(r);
   return `<header class="floating-nav ${active ? 'in-round' : ''}">
-    <a class="brand" href="/" data-action="${r ? 'exit-room' : 'home'}" aria-label="Spyfall home"><img class="brand-wordmark" src="/wordmark.svg" alt="" width="112" height="38"><img class="brand-mini" src="/favicon.svg" alt="" width="34" height="34"></a>
-    ${r ? `<span class="room-tag" aria-label="Room ${esc(state.code)}" title="Room code">${esc(state.code)}</span>` : ''}
-    <nav class="nav-actions" aria-label="${r ? 'Room' : 'Game'} controls">
-      ${active ? '<div class="nav-timer"><span id="timer" aria-label="Suggested time remaining">--:--</span></div>' : ''}
-      <button type="button" class="nav-icon sound-control" data-action="sound" aria-label="Sound" aria-pressed="${soundEnabled()}" title="${soundEnabled() ? 'Mute sound' : 'Enable sound'}">${soundIcon()}</button>
-      ${active && r.hostId === state.uid ? '<button type="button" class="nav-icon nav-stop" data-action="end-round" aria-label="Round controls" title="Round controls"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="3"/></svg></button>' : ''}
-      ${r ? `<button type="button" class="nav-icon nav-exit" data-action="exit-room" aria-label="Exit room" title="Exit room">${icon('exit', 20)}</button>` : ''}
+    <a class="brand" href="/" data-action="${r ? 'exit-room' : 'home'}" aria-label="${t("Spyfall home")}"><img class="brand-wordmark" src="/wordmark.svg" alt="" width="112" height="38"><img class="brand-mini" src="/favicon.svg" alt="" width="34" height="34"></a>
+    ${r ? `<span class="room-tag" aria-label="${t("Room {v0}", { v0: esc(state.code) })}" title="${t("Room code")}">${esc(state.code)}</span>` : ''}
+    <nav class="nav-actions" aria-label="${r ? t('Room controls') : t('Game controls')}">
+      ${active ? `<div class="nav-timer"><span id="timer" aria-label="${t("Suggested time remaining")}">--:--</span></div>` : ''}
+      <button type="button" class="nav-icon sound-control" data-action="sound" aria-label="${t("Sound")}" aria-pressed="${soundEnabled()}" title="${soundEnabled() ? t("Mute sound") : t("Enable sound")}">${soundIcon()}</button>
+      ${active && r.hostId === state.uid ? `<button type="button" class="nav-icon nav-stop" data-action="end-round" aria-label="${t("Round controls")}" title="${t("Round controls")}"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="3"/></svg></button>` : ''}
+      ${r ? `<button type="button" class="nav-icon nav-exit" data-action="exit-room" aria-label="${t("Exit room")}" title="${t("Exit room")}">${icon('exit', 20)}</button>` : ''}
     </nav>
   </header>`;
 }
 function soundIcon() {
-  return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m11 4-5 4H3v8h3l5 4Z"/>${soundEnabled() ? '<path d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>' : '<path d="m16 9 6 6m0-6-6 6"/>'}</svg>`;
+  return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m11 4-5 4H3v8h3l5 4Z"/>${soundEnabled() ? `<path d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>` : `<path d="m16 9 6 6m0-6-6 6"/>`}</svg>`;
 }
 function shell(content) {
   const screen = `${state.code}:${inRound(state.room) ? 'round' : state.room?.status || 'home'}:${state.room?.roundId || 0}:${state.room?.status === 'lobby' ? state.tab : ''}`;
@@ -276,7 +279,7 @@ function shell(content) {
   const usageView = state.room ? (inRound(state.room) ? 'round' : state.room.status === 'ended' ? 'result' : 'lobby') : state.loading ? 'loading' : 'home';
   usageScreen(usageView, state.room ? state.code : '');
   if (entered) trackUsage('screen_view', { screen: usageView, roundId: state.room?.roundId || 0 });
-  renderHtml($('#app'), `<div class="shell game-table">${header()}<main class="${entered ? 'screen-enter' : ''}">${content}</main><footer><button type="button" class="footer-credit" data-action="account" aria-label="Open account">made with <span class="footer-heart" role="img" aria-label="love">♥</span> by vonUbisch</button></footer></div>`);
+  renderHtml($('#app'), `<div class="shell game-table">${header()}<main class="${entered ? 'screen-enter' : ''}">${content}</main><footer><button type="button" class="footer-credit" data-action="account" aria-label="${t("Open account")}">${t('made with {heart} by vonUbisch', { heart: `<span class="footer-heart" role="img" aria-label="${t("love")}">♥</span>` })}</button><label class="language-picker"><span>${t('Language')}</span><select id="language" aria-label="${t("Language")}">${LANGUAGES.map(item => `<option value="${item.code}" lang="${item.code}" ${getLanguage() === item.code ? 'selected' : ''}>${item.name}</option>`).join('')}</select></label><p class="language-hint">${t('Language applies only to you.')}</p></footer></div>`);
   document.querySelectorAll('[data-player-id]').forEach((row, index) => {
     if (entered || !lastPlayerIds.includes(row.dataset.playerId)) { row.classList.add('player-enter'); row.style.setProperty('--arrival', `${Math.min(index, 5) * 45}ms`); }
     if (!entered && row.dataset.vote !== lastVotes[row.dataset.playerId]) row.querySelector('.player-meta')?.classList.add('vote-updated');
@@ -292,12 +295,12 @@ function homeAccount() {
   const user = auth.currentUser;
   if (googleAccount(user)) {
     const profile = ownProfile || googleProfile(user);
-    return `<button class="input-account connected" type="button" data-action="rename" aria-label="Edit your Google profile" title="Connected with Google · Edit profile"><span class="avatar portrait">${playerAvatar(profile)}</span></button>`;
+    return `<button class="input-account connected" type="button" data-action="rename" aria-label="${t("Edit your Google profile")}" title="${t("Connected with Google · Edit profile")}"><span class="avatar portrait">${playerAvatar(profile)}</span></button>`;
   }
-  return `<button class="input-account" type="button" data-action="google" aria-label="Continue with Google" title="Continue with Google">${googleLogo}</button>`;
+  return `<button class="input-account" type="button" data-action="google" aria-label="${t("Continue with Google")}" title="${t("Continue with Google")}">${googleLogo}</button>`;
 }
 function home() {
-  shell(`<section class="hero"><div class="eyebrow"><span class="dot"></span> SAME ROOM. SEPARATE PHONES.</div><h1>Good friends.<br><em>Great liars.</em></h1><p>One secret location. Spies in your midst.<br>Find out who’s hiding in plain sight.</p><div class="hero-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="agent agent-one">${icon('eye', 44)}</div><div class="agent agent-two">${icon('eye', 44)}</div><div class="agent agent-three">?</div><span class="art-note">trust no one.</span><span class="spark">✳</span></div><div class="facts"><span>${icon('users', 16)}2–15 players</span><span>${icon('clock', 16)}2–20 minutes</span><span>1–3 spies.</span></div></section><section class="panel entry"><label for="entry-name">WHAT SHOULD WE CALL YOU?</label><div class="name-field"><input id="entry-name" maxlength="20" autocomplete="nickname" placeholder="Your name" value="${esc(savedName)}">${homeAccount()}</div><button class="button primary" data-action="create">Create a room ${icon('plus')}</button><div class="divider"><span>or join your friends</span></div><form id="join-form"><label class="sr-only" for="code">Room code</label><div class="join-row"><input id="code" maxlength="6" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="ROOM CODE" value="${esc(state.code)}" required pattern="[A-Za-z2-9]{6}"><button class="button secondary" type="submit">Join ${icon('arrow')}</button></div></form><p class="fineprint">Got a QR code? Scan it with your phone’s camera.</p></section><button class="text-button leaderboard-link" data-action="scores">View overall leaderboard</button><section class="how"><div class="section-heading"><h2>A quick briefing</h2><span>01—03</span></div><div class="step"><span>01</span><div><h3>Get your secret</h3><p>Everyone learns the location. Except the spies.</p></div></div><div class="step"><span>02</span><div><h3>Ask. Answer. Act natural.</h3><p>Question each other out loud. Be specific enough to fit in, vague enough to keep the secret.</p></div></div><div class="step"><span>03</span><div><h3>Make your move</h3><p>Vote out the spy, or guess the location if you are one. Watch the clock.</p></div></div></section>`);
+  shell(`<section class="hero"><div class="eyebrow"><span class="dot"></span> ${t("SAME ROOM. SEPARATE PHONES.")}</div><h1>${t("Good friends.")}<br><em>${t("Great liars.")}</em></h1><p>${t("One secret location. Spies in your midst.")}<br>${t("Find out who’s hiding in plain sight.")}</p><div class="hero-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="agent agent-one">${icon('eye', 44)}</div><div class="agent agent-two">${icon('eye', 44)}</div><div class="agent agent-three">?</div><span class="art-note">${t("trust no one.")}</span><span class="spark">✳</span></div><div class="facts"><span>${icon('users', 16)}${t("2–15 players")}</span><span>${icon('clock', 16)}${t("2–20 minutes")}</span><span>${t("1–3 spies.")}</span></div></section><section class="panel entry"><label for="entry-name">${t("WHAT SHOULD WE CALL YOU?")}</label><div class="name-field"><input id="entry-name" maxlength="20" autocomplete="nickname" placeholder="${t("Your name")}" value="${esc(savedName)}">${homeAccount()}</div><button class="button primary" data-action="create">${t("Create a room")} ${icon('plus')}</button><div class="divider"><span>${t("or join your friends")}</span></div><form id="join-form"><label class="sr-only" for="code">${t("Room code")}</label><div class="join-row"><input id="code" maxlength="6" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="${t("ROOM CODE")}" value="${esc(state.code)}" required pattern="[A-Za-z2-9]{6}"><button class="button secondary" type="submit">${t("Join")} ${icon('arrow')}</button></div></form><p class="fineprint">${t("Got a QR code? Scan it with your phone’s camera.")}</p></section><button class="text-button leaderboard-link" data-action="scores">${t("View overall leaderboard")}</button><section class="how"><div class="section-heading"><h2>${t("A quick briefing")}</h2><span>01—03</span></div><div class="step"><span>01</span><div><h3>${t("Get your secret")}</h3><p>${t("Everyone learns the location. Except the spies.")}</p></div></div><div class="step"><span>02</span><div><h3>${t("Ask. Answer. Act natural.")}</h3><p>${t("Question each other out loud. Be specific enough to fit in, vague enough to keep the secret.")}</p></div></div><div class="step"><span>03</span><div><h3>${t("Make your move")}</h3><p>${t("Vote out the spy, or guess the location if you are one. Watch the clock.")}</p></div></div></section>`);
 }
 function playerList(voting = false) {
   const r = state.room;
@@ -305,22 +308,22 @@ function playerList(voting = false) {
     const count = Object.values(r.votes || {}).filter(id => id === p.id).length;
     const caught = r.caughtIds.includes(p.id), canVote = r.status === 'active' && !r.caughtIds.includes(state.uid);
     const selected = r.votes[state.uid] === p.id;
-    return `<div class="player ${caught ? 'caught-player' : ''} ${selected && voting ? 'vote-selected' : ''}" data-player-id="${esc(p.id)}" data-vote="${count}"><span class="avatar portrait">${playerAvatar(p)}</span><div class="player-name">${esc(p.name)}${p.id === state.uid ? ' <small>(you)</small>' : ''}<span class="player-meta">${caught ? 'Spy caught' : voting ? `${count} ${count === 1 ? 'vote' : 'votes'}${selected ? ' · yours' : ''}` : p.id === r.hostId ? 'Host' : 'Ready'}</span></div>${voting ? (caught ? '<span class="caught-badge">Caught</span>' : p.id !== state.uid ? `<button class="vote-button ${selected ? 'selected' : ''}" data-action="vote" data-target="${esc(p.id)}" aria-label="Vote for ${esc(p.name)}" aria-pressed="${selected}" ${!canVote ? 'disabled' : ''}>${selected ? icon('check', 16) : '<span class="sr-only">Vote</span>'}</button>` : '') : p.id === state.uid ? '<button class="text-button profile-action" data-action="rename">Edit profile</button>' : state.uid === r.hostId ? `<button class="icon-button remove" data-action="remove" data-target="${esc(p.id)}" aria-label="Remove ${esc(p.name)}">×</button>` : ''}</div>`;
+    return `<div class="player ${caught ? 'caught-player' : ''} ${selected && voting ? 'vote-selected' : ''}" data-player-id="${esc(p.id)}" data-vote="${count}"><span class="avatar portrait">${playerAvatar(p)}</span><div class="player-name"><bdi>${esc(p.name)}</bdi>${p.id === state.uid ? ` <small>${t("(you)")}</small>` : ''}<span class="player-meta">${caught ? t("Spy caught") : voting ? t('Votes: {count}', { count }) + (selected ? t(' · yours') : '') : p.id === r.hostId ? t("Host") : t("Ready")}</span></div>${voting ? (caught ? `<span class="caught-badge">${t("Caught")}</span>` : p.id !== state.uid ? `<button class="vote-button ${selected ? 'selected' : ''}" data-action="vote" data-target="${esc(p.id)}" aria-label="${t("Vote for {v0}", { v0: esc(p.name) })}" aria-pressed="${selected}" ${!canVote ? 'disabled' : ''}>${selected ? icon('check', 16) : `<span class="sr-only">${t("Vote")}</span>`}</button>` : '') : p.id === state.uid ? `<button class="text-button profile-action" data-action="rename">${t("Edit profile")}</button>` : state.uid === r.hostId ? `<button class="icon-button remove" data-action="remove" data-target="${esc(p.id)}" aria-label="${t("Remove {v0}", { v0: esc(p.name) })}">×</button>` : ''}</div>`;
   }).join('');
 }
 function readRulesForm() {
-  return { minutes: Number($('#minutes').value), spies: Number($('#spies').value), voting: $('#voting').value, locations: [...document.querySelectorAll('.location-input')].map(input => input.value.trim()) };
+  return { minutes: Number($('#minutes').value), spies: Number($('#spies').value), voting: $('#voting').value, locations: [...document.querySelectorAll('.location-input')].map(locationInputValue) };
 }
 function editLocation(type, index) {
   const draft = readRulesForm();
   if (type === 'add-location') {
-    const value = $('#new-location').value.trim();
-    if (!value) { notice('Enter a location name first.'); return; }
-    if (draft.locations.length >= 40) { notice('You can use up to 40 locations.'); return; }
-    if (draft.locations.some(location => location.toLowerCase() === value.toLowerCase())) { notice('That location is already in the list.'); return; }
+    const value = canonicalLocation($('#new-location').value);
+    if (!value) { notice(t("Enter a location name first.")); return; }
+    if (draft.locations.length >= 40) { notice(t("You can use up to 40 locations.")); return; }
+    if (draft.locations.some(location => location.toLowerCase() === value.toLowerCase())) { notice(t("That location is already in the list.")); return; }
     draft.locations.push(value);
   } else {
-    if (draft.locations.length <= 3) { notice('Keep at least 3 locations.'); return; }
+    if (draft.locations.length <= 3) { notice(t("Keep at least 3 locations.")); return; }
     draft.locations.splice(index, 1);
   }
   state.draft = draft; render();
@@ -328,16 +331,16 @@ function editLocation(type, index) {
 }
 function rules() {
   const r = state.room, host = r.hostId === state.uid, d = state.draft || r.settings;
-  return `<section class="panel settings"><div class="section-heading"><h2>Set the scene</h2><span>${host ? 'HOST CONTROLS' : 'HOUSE RULES'}</span></div>${host ? `<form id="rules-form">
-    <label for="minutes">ROUND LENGTH <output id="minutes-label">${d.minutes} min</output></label><input type="range" id="minutes" min="2" max="20" step="1" value="${d.minutes}" aria-valuetext="${d.minutes} minutes" style="--range-progress: ${(d.minutes - 2) / 18 * 100}%"><p class="fineprint">Choose between 2 and 20 minutes.</p>
-    <label for="voting">VOTING RULE</label><select id="voting"><option value="majority" ${d.voting === 'majority' ? 'selected' : ''}>Majority wins</option><option value="unanimous" ${d.voting === 'unanimous' ? 'selected' : ''}>Everyone except the accused</option></select>
-    <label for="spies">NUMBER OF SPIES</label><select id="spies">${Array.from({ length: MAX_SPIES }, (_, i) => `<option value="${i + 1}" ${d.spies === i + 1 ? 'selected' : ''}>${spyLabel(i + 1)} · ${requiredPlayers(i + 1)}+ players</option>`).join('')}</select><p class="fineprint">Catch every spy to win. Caught spies sit out.</p>
-    <label for="location-set">LOCATION SET</label><select id="location-set">${LOCATION_SETS.map(set => `<option value="${set.id}" ${locationSetId(d.locations) === set.id ? 'selected' : ''}>${set.name}</option>`).join('')}${locationSetId(d.locations) === 'custom' ? '<option value="custom" selected>Custom selection</option>' : ''}</select><p class="fineprint">Choosing a set replaces the list below. Add, edit, or remove locations to make it your own.</p>
-    <div class="location-editor-heading">POSSIBLE LOCATIONS <span>${d.locations.length}/40 · minimum 3</span></div>
-    <div class="location-editor">${d.locations.map((location, i) => `<div class="location-row"><input class="location-input" aria-label="Location ${i + 1}" maxlength="40" value="${esc(location)}" required><button type="button" class="remove-location" data-action="remove-location" data-index="${i}" aria-label="Remove ${esc(location)}" ${d.locations.length <= 3 ? 'disabled' : ''}>×</button></div>`).join('')}</div>
-    <label for="new-location">ADD A LOCATION</label><div class="add-location-row"><input id="new-location" maxlength="40" placeholder="e.g. Ski resort"><button type="button" class="button outline" data-action="add-location" ${d.locations.length >= 40 ? 'disabled' : ''}>Add ${icon('plus', 16)}</button></div>
-    <p class="fineprint">Everyone can see this list. Only non-spies see the chosen location. Save your changes before starting. This list is saved to your profile for future rooms.</p><button class="button secondary full" type="submit">Save rules ${icon('check')}</button>
-  </form>` : `<dl class="rule-summary"><div><dt>Round length</dt><dd>${r.settings.minutes} minutes</dd></div><div><dt>Spies</dt><dd>${r.settings.spies}</dd></div><div><dt>Voting</dt><dd>${r.settings.voting === 'majority' ? 'Majority' : 'All except accused'}</dd></div></dl><div class="location-chips">${r.settings.locations.map(l => `<span>${esc(l)}</span>`).join('')}</div>`}</section>`;
+  return `<section class="panel settings"><div class="section-heading"><h2>${t("Set the scene")}</h2><span>${host ? t("HOST CONTROLS") : t("HOUSE RULES")}</span></div>${host ? `<form id="rules-form">
+    <label for="minutes">${t("ROUND LENGTH")} <output id="minutes-label">${t("{v0} min", { v0: d.minutes })}</output></label><input type="range" id="minutes" min="2" max="20" step="1" value="${d.minutes}" aria-valuetext="${t("{v0} minutes", { v0: d.minutes })}" style="--range-progress: ${(d.minutes - 2) / 18 * 100}%"><p class="fineprint">${t("Choose between 2 and 20 minutes.")}</p>
+    <label for="voting">${t("VOTING RULE")}</label><select id="voting"><option value="majority" ${d.voting === 'majority' ? 'selected' : ''}>${t("Majority wins")}</option><option value="unanimous" ${d.voting === 'unanimous' ? 'selected' : ''}>${t("Everyone except the accused")}</option></select>
+    <label for="spies">${t("NUMBER OF SPIES")}</label><select id="spies">${Array.from({ length: MAX_SPIES }, (_, i) => `<option value="${i + 1}" ${d.spies === i + 1 ? 'selected' : ''}>${t("{v0} · {v1}+ players", { v0: spyLabel(i + 1), v1: requiredPlayers(i + 1) })}</option>`).join('')}</select><p class="fineprint">${t("Catch every spy to win. Caught spies sit out.")}</p>
+    <label for="location-set">${t("LOCATION SET")}</label><select id="location-set">${LOCATION_SETS.map(set => `<option value="${set.id}" ${locationSetId(d.locations) === set.id ? 'selected' : ''}>${t(set.name)}</option>`).join('')}${locationSetId(d.locations) === 'custom' ? `<option value="custom" selected>${t("Custom selection")}</option>` : ''}</select><p class="fineprint">${t("Choosing a set replaces the list below. Add, edit, or remove locations to make it your own.")}</p>
+    <div class="location-editor-heading">${t("POSSIBLE LOCATIONS")} <span>${t("{v0}/40 · minimum 3", { v0: d.locations.length })}</span></div>
+    <div class="location-editor">${d.locations.map((location, i) => `<div class="location-row"><input class="location-input" aria-label="${t("Location {v0}", { v0: i + 1 })}" maxlength="40" value="${esc(locationName(location))}" data-canonical="${esc(location)}" data-label="${esc(locationName(location))}" required><button type="button" class="remove-location" data-action="remove-location" data-index="${i}" aria-label="${esc(t('Remove {name}', { name: locationName(location) }))}" ${d.locations.length <= 3 ? 'disabled' : ''}>×</button></div>`).join('')}</div>
+    <label for="new-location">${t("ADD A LOCATION")}</label><div class="add-location-row"><input id="new-location" maxlength="40" placeholder="${t("e.g. Ski resort")}"><button type="button" class="button outline" data-action="add-location" ${d.locations.length >= 40 ? 'disabled' : ''}>${t("Add")} ${icon('plus', 16)}</button></div>
+    <p class="fineprint">${t("Everyone can see this list. Only non-spies see the chosen location. Save your changes before starting. This list is saved to your profile for future rooms. Enter custom locations in English; built-in places translate for each player.")}</p><button class="button secondary full" type="submit">${t("Save rules")} ${icon('check')}</button>
+  </form>` : `<dl class="rule-summary"><div><dt>${t("Round length")}</dt><dd>${t("{v0} minutes", { v0: r.settings.minutes })}</dd></div><div><dt>${t("Spies")}</dt><dd>${r.settings.spies}</dd></div><div><dt>${t("Voting")}</dt><dd>${r.settings.voting === 'majority' ? t("Majority") : t("All except accused")}</dd></div></dl><div class="location-chips">${r.settings.locations.map(l => `<span>${esc(locationName(l))}</span>`).join('')}</div>`}</section>`;
 }
 function updateLobbyReadiness() {
   if (state.room?.status !== 'lobby') return;
@@ -345,7 +348,7 @@ function updateLobbyReadiness() {
   const waiting = $('#lobby-waiting');
   if (waiting) {
     waiting.hidden = needed <= 0;
-    waiting.textContent = needed > 0 ? `Waiting for ${needed} more ${needed === 1 ? 'player' : 'players'} for ${spyLabel(settings.spies)}…` : '';
+    waiting.textContent = needed > 0 ? t('{count} more needed · {spies}', { count: needed, spies: spyLabel(settings.spies) }) : '';
   }
   const start = $('[data-action="start"]');
   if (start) start.disabled = state.busy || !canStart;
@@ -353,47 +356,47 @@ function updateLobbyReadiness() {
 function lobby() {
   const r = state.room, host = r.hostId === state.uid;
   const { settings } = lobbyReadiness(r, state.uid, state.draft);
-  shell(`<div class="lobby-intro"><span class="eyebrow">THE LOBBY</span><h1>The usual suspects.</h1><p>${host ? 'Scan the code. Take your place.' : 'You’re in. Your host will start the round.'}<br>Best played with 4 or more people.</p></div>
-    <section class="invite panel" aria-label="Invite friends"><div><label>INVITE YOUR FRIENDS</label><strong class="room-code">${esc(state.code)}</strong><button class="text-button" data-action="share">${icon('copy', 16)} Copy invite link</button></div><canvas id="qr" aria-label="Scan to join this room" role="img"></canvas></section>
-    <div class="tabs lobby-tabs" role="tablist" aria-label="Lobby sections"><button role="tab" aria-selected="${state.tab === 'players'}" data-action="players">Players <span>${r.players.length}/${MAX_PLAYERS}</span></button><button role="tab" aria-selected="${state.tab === 'rules'}" data-action="rules">Game rules ${icon('clock', 16)}</button></div>
-    ${state.tab === 'players' ? `<section class="roster player-grid lobby-roster" aria-label="Players">${playerList()}</section><div class="round-summary">${icon('clock', 16)} ${settings.minutes} min <span>·</span> ${settings.locations.length} locations <span>·</span> ${spyLabel(settings.spies)}${host && state.draft ? '<span>· Unsaved changes</span>' : ''}</div>` : rules()}
+  shell(`<div class="lobby-intro"><span class="eyebrow">${t("THE LOBBY")}</span><h1>${t("The usual suspects.")}</h1><p>${host ? t("Scan the code. Take your place.") : t("You’re in. Your host will start the round.")}<br>${t("Best played with 4 or more people.")}</p></div>
+    <section class="invite panel" aria-label="${t("Invite friends")}"><div><label>${t("INVITE YOUR FRIENDS")}</label><strong class="room-code">${esc(state.code)}</strong><button class="text-button" data-action="share">${icon('copy', 16)} ${t("Copy invite link")}</button></div><canvas id="qr" aria-label="${t("Scan to join this room")}" role="img"></canvas></section>
+    <div class="tabs lobby-tabs" role="tablist" aria-label="${t("Lobby sections")}"><button role="tab" aria-selected="${state.tab === 'players'}" data-action="players">${t("Players")} <span>${r.players.length}/${MAX_PLAYERS}</span></button><button role="tab" aria-selected="${state.tab === 'rules'}" data-action="rules">${t("Game rules")} ${icon('clock', 16)}</button></div>
+    ${state.tab === 'players' ? `<section class="roster player-grid lobby-roster" aria-label="${t("Players")}">${playerList()}</section><div class="round-summary">${icon('clock', 16)} ${t("{v0} min", { v0: settings.minutes })} <span>·</span> ${t("{v0} locations", { v0: settings.locations.length })} <span>·</span> ${spyLabel(settings.spies)}${host && state.draft ? `<span>${t("· Unsaved changes")}</span>` : ''}</div>` : rules()}
     <p class="waiting" id="lobby-waiting" aria-live="polite" hidden></p>
-    <div class="bottom-action">${host ? `<button class="button primary full" data-action="start" disabled>Start the game ${icon('arrow')}</button>` : `<div class="waiting-host"><span class="pulse"></span> Waiting for the host to start</div>`}</div><button class="text-button leaderboard-link" data-action="scores">Leaderboards</button>`);
+    <div class="bottom-action">${host ? `<button class="button primary full" data-action="start" disabled>${t("Start the game")} ${icon('arrow')}</button>` : `<div class="waiting-host"><span class="pulse"></span> ${t("Waiting for the host to start")}</div>`}</div><button class="text-button leaderboard-link" data-action="scores">${t("Leaderboards")}</button>`);
   updateLobbyReadiness();
-  QRCode.toCanvas($('#qr'), inviteUrl(), { width: 256, margin: 4, color: { dark: '#10213c', light: '#ffffff' } }).catch(() => notice('QR code unavailable. You can still share the invite link.'));
+  QRCode.toCanvas($('#qr'), inviteUrl(), { width: 256, margin: 4, color: { dark: '#10213c', light: '#ffffff' } }).catch(() => notice(t("QR code unavailable. You can still share the invite link.")));
 }
 function active() {
   const r = state.room, role = state.role?.roundId === r.roundId ? state.role : null;
   const spy = role?.isSpy;
   const locations = `<section class="locations-detail" aria-labelledby="locations-heading">
-    <div class="section-heading"><h2 id="locations-heading">Possible locations</h2><span>${r.settings.locations.length} ${icon('pin', 16)}</span></div>
-    <p class="fineprint">Your shared shortlist. Spies can tap a place to guess.</p>
-    <div class="location-chips guess-grid">${r.settings.locations.map(l => `<button data-action="guess" data-location="${esc(l)}" aria-label="Guess ${esc(l)}" ${r.status === 'accusing' || r.caughtIds.includes(state.uid) ? 'disabled' : ''}>${esc(l)}</button>`).join('')}</div>
+    <div class="section-heading"><h2 id="locations-heading">${t("Possible locations")}</h2><span>${r.settings.locations.length} ${icon('pin', 16)}</span></div>
+    <p class="fineprint">${t("Your shared shortlist. Spies can tap a place to guess.")}</p>
+    <div class="location-chips guess-grid">${r.settings.locations.map(l => `<button data-action="guess" data-location="${esc(l)}" aria-label="${esc(t('Guess {location}', { location: locationName(l) }))}" ${r.status === 'accusing' || r.caughtIds.includes(state.uid) ? 'disabled' : ''}>${esc(locationName(l))}</button>`).join('')}</div>
   </section>`;
-  shell(`<div class="round-context"><span>ROUND ${String(r.roundId).padStart(2, '0')} · ${spyLabel(r.settings.spies).toUpperCase()}</span>${r.settings.spies > 1 ? `<span>${r.caughtIds.length}/${r.settings.spies} caught</span>` : ''}</div><h1 class="round-title">Trust your instincts.</h1>
-    ${r.status === 'accusing' ? '<p class="round-status" role="status"><span class="pulse"></span> Checking the accusation…</p>' : ''}
-    ${r.caughtIds.includes(state.uid) ? '<p class="round-status">You’ve been caught. Watch the remaining players finish the round.</p>' : ''}
-    <section class="role-card ${state.reveal && spy ? 'spy-card' : ''}" id="role-card"><button class="hold-reveal role-trigger" id="reveal-role" type="button" aria-label="Hold to reveal your role" aria-pressed="${state.reveal}" aria-describedby="reveal-help" ${!role ? 'disabled' : ''}><span id="role-content">${roleContent(role)}</span><span class="role-control">${icon('eye', 24)}</span></button><span id="reveal-help" class="sr-only">Release to hide. Keyboard: hold Space or Enter.</span></section>
+  shell(`<div class="round-context"><span>${t("ROUND {v0} · {v1}", { v0: String(r.roundId).padStart(2, '0'), v1: spyLabel(r.settings.spies).toUpperCase() })}</span>${r.settings.spies > 1 ? `<span>${t("{v0}/{v1} caught", { v0: r.caughtIds.length, v1: r.settings.spies })}</span>` : ''}</div><h1 class="round-title">${t("Trust your instincts.")}</h1>
+    ${r.status === 'accusing' ? `<p class="round-status" role="status"><span class="pulse"></span> ${t("Checking the accusation…")}</p>` : ''}
+    ${r.caughtIds.includes(state.uid) ? `<p class="round-status">${t("You’ve been caught. Watch the remaining players finish the round.")}</p>` : ''}
+    <section class="role-card ${state.reveal && spy ? 'spy-card' : ''}" id="role-card"><button class="hold-reveal role-trigger" id="reveal-role" type="button" aria-label="${t("Hold to reveal your role")}" aria-pressed="${state.reveal}" aria-describedby="reveal-help" ${!role ? 'disabled' : ''}><span id="role-content">${roleContent(role)}</span><span class="role-control">${icon('eye', 24)}</span></button><span id="reveal-help" class="sr-only">${t("Release to hide. Keyboard: hold Space or Enter.")}</span></section>
     <p id="timer-guidance" class="round-status timer-guidance" role="status" hidden></p>
-    <div class="section-heading section-space"><h2>Who’s the spy?</h2><span>${Object.keys(r.votes).length}/${eligiblePlayers(r).length} VOTED</span></div>
-    <p class="section-description">Tap a player to vote. ${threshold(r)} ${threshold(r) === 1 ? 'vote confirms' : 'votes confirm'} an accusation.${r.settings.spies > 1 ? ' Catch every spy to win.' : ''}</p>
-    <section class="roster player-grid voting-roster" aria-label="Vote for a player">${playerList(true)}</section>
-    <p class="fineprint centered vote-help">You can change your vote until an accusation passes.</p>
+    <div class="section-heading section-space"><h2>${t("Who’s the spy?")}</h2><span>${t("{v0}/{v1} VOTED", { v0: Object.keys(r.votes).length, v1: eligiblePlayers(r).length })}</span></div>
+    <p class="section-description">${t('Tap a player to vote. Votes needed: {count}.', { count: threshold(r) })}${r.settings.spies > 1 ? t(" Catch every spy to win.") : ''}</p>
+    <section class="roster player-grid voting-roster" aria-label="${t("Vote for a player")}">${playerList(true)}</section>
+    <p class="fineprint centered vote-help">${t("You can change your vote until an accusation passes.")}</p>
     ${locations}
-    <section class="question-ideas" aria-label="Question ideas"><div><span class="eyebrow">ASK AROUND</span><p id="question-text" aria-live="polite">${QUESTION_IDEAS[questionIndex % QUESTION_IDEAS.length]}</p></div><button class="nav-icon" data-action="more-questions" aria-label="Next question idea">${icon('arrow', 20)}</button></section>`);
+    <section class="question-ideas" aria-label="${t("Question ideas")}"><div><span class="eyebrow">${t("ASK AROUND")}</span><p id="question-text" aria-live="polite">${questionText(QUESTION_IDEAS[questionIndex % QUESTION_IDEAS.length])}</p></div><button class="nav-icon" data-action="more-questions" aria-label="${t("Next question idea")}">${icon('arrow', 20)}</button></section>`);
 }
 function ended() {
   const r = state.room, result = r.result;
-  if (!result?.winner) return shell('<div class="loading"><span class="pulse"></span><h2>Opening the case file…</h2><button class="text-button" data-action="refresh-result">Try again</button></div>');
+  if (!result?.winner) return shell(`<div class="loading"><span class="pulse"></span><h2>${t("Opening the case file…")}</h2><button class="text-button" data-action="refresh-result">${t("Try again")}</button></div>`);
   const spies = r.players.filter(p => result.spyIds.includes(p.id)), multiple = spies.length > 1;
   const spy = r.players.find(p => p.id === result.guesserId) || spies[0];
   const accused = r.players.find(p => p.id === result.accusedId);
-  const reason = result.reason === 'host' ? 'The host ended the round with spies still in play.' : result.reason === 'timeout' ? 'Time ran out before all spies were caught.' : result.reason === 'guess' ? `${spy?.name} guessed “${result.guess}”. ${result.winner === 'spy' ? 'Right on the mark.' : 'The secret stayed safe.'}` : `${accused?.name} was accused. ${result.winner === 'players' ? 'Every spy has been caught.' : 'An innocent player. The spies win.'}`;
-  shell(`<div class="eyebrow page-label"><span class="dot"></span> ROUND ${r.roundId} COMPLETE</div><div class="result-art">${icon('eye', 80)}<span>CASE CLOSED</span></div><h1 class="page-title result-title">${result.winner === 'spy' ? `${multiple ? 'The spies' : 'The spy'}<br><em>got away.</em>` : 'Cover<br><em>blown.</em>'}</h1><p class="subtitle">${result.winner === 'spy' ? `${multiple ? 'The spies win' : 'The spy wins'} this round.` : 'The group wins this round.'}</p><section class="panel result-panel"><label>${multiple ? 'THE SPIES WERE' : 'THE SPY WAS'}</label><h2>${spies.map(p => `<span class="named-player"><span class="avatar portrait">${playerAvatar(p)}</span>${esc(p.name)}</span>`).join('')}</h2><div class="result-location">${icon('pin')}<div><label>THE SECRET LOCATION</label><strong>${esc(result.location)}</strong></div></div><p class="result-reason">${(result.reason === 'vote' ? accused : result.reason === 'guess' ? spy : null) ? `<span class="avatar portrait">${playerAvatar(result.reason === 'vote' ? accused : spy)}</span>` : ''}<span>${esc(reason)}</span></p></section><div class="bottom-action">${state.uid === r.hostId ? `<button class="button primary full" data-action="reset">Back to lobby ${icon('arrow')}</button>` : '<div class="waiting-host"><span class="pulse"></span> Waiting for the host’s next round</div>'}<button class="text-button leaderboard-link" data-action="scores">Leaderboards</button><p class="fineprint centered">Same friends. A new secret.</p></div>`);
+  const reason = result.reason === 'host' ? t('The host ended the round with spies still in play.') : result.reason === 'timeout' ? t('Time ran out before all spies were caught.') : result.reason === 'guess' ? t(result.winner === 'spy' ? '{name} guessed “{location}”. Right on the mark.' : '{name} guessed “{location}”. The secret stayed safe.', { name: spy?.name, location: locationName(result.guess) }) : t(result.winner === 'players' ? '{name} was accused. Every spy has been caught.' : '{name} was accused. An innocent player. The spies win.', { name: accused?.name });
+  shell(`<div class="eyebrow page-label"><span class="dot"></span> ${t("ROUND {v0} COMPLETE", { v0: r.roundId })}</div><div class="result-art">${icon('eye', 80)}<span>${t("CASE CLOSED")}</span></div><h1 class="page-title result-title">${result.winner === 'spy' ? `<em>${t(multiple ? 'The spies escaped.' : 'The spy escaped.')}</em>` : `<em>${t('Cover blown.')}</em>`}</h1><p class="subtitle">${result.winner === 'spy' ? t(multiple ? 'The spies win this round.' : 'The spy wins this round.') : t("The group wins this round.")}</p><section class="panel result-panel"><label>${multiple ? t("THE SPIES WERE") : t("THE SPY WAS")}</label><h2>${spies.map(p => `<span class="named-player"><span class="avatar portrait">${playerAvatar(p)}</span><bdi>${esc(p.name)}</bdi></span>`).join('')}</h2><div class="result-location">${icon('pin')}<div><label>${t("THE SECRET LOCATION")}</label><strong>${esc(locationName(result.location))}</strong></div></div><p class="result-reason">${(result.reason === 'vote' ? accused : result.reason === 'guess' ? spy : null) ? `<span class="avatar portrait">${playerAvatar(result.reason === 'vote' ? accused : spy)}</span>` : ''}<span>${esc(reason)}</span></p></section><div class="bottom-action">${state.uid === r.hostId ? `<button class="button primary full" data-action="reset">${t("Back to lobby")} ${icon('arrow')}</button>` : `<div class="waiting-host"><span class="pulse"></span> ${t("Waiting for the host’s next round")}</div>`}<button class="text-button leaderboard-link" data-action="scores">${t("Leaderboards")}</button><p class="fineprint centered">${t("Same friends. A new secret.")}</p></div>`);
 }
 function render() {
   if (state.reveal) concealRole();
-  if (state.loading && !state.room) return shell('<div class="loading"><span class="pulse"></span><h2>Finding your room…</h2><button class="text-button" data-action="home">Return home</button></div>');
+  if (state.loading && !state.room) return shell(`<div class="loading"><span class="pulse"></span><h2>${t("Finding your room…")}</h2><button class="text-button" data-action="home">${t("Return home")}</button></div>`);
   if (!state.room) return home();
   if (state.room.status === 'lobby') lobby();
   else if (inRound(state.room)) active();
@@ -415,7 +418,7 @@ async function loadResult() {
         else playTimeout();
       }
       render();
-      void saveScores().catch(() => notice('Scores haven’t synced yet. Open Leaderboards to retry.'));
+      void saveScores().catch(() => notice(t("Scores haven’t synced yet. Open Leaderboards to retry.")));
     }
   } catch (error) { notice(errorMessage(error)); }
 }
@@ -433,7 +436,7 @@ async function connect(code) {
       if (version !== connectionVersion) return;
       const membership = membershipState(snap, state.uid);
       if (membership === 'pending') return;
-      if (membership === 'removed') { disconnect(); render(); notice('You are no longer in this room.'); return; }
+      if (membership === 'removed') { disconnect(); render(); notice(t("You are no longer in this room.")); return; }
       const next = normalizeRoom(snap.data());
       if (!snap.metadata.hasPendingWrites && !snap.metadata.fromCache) {
         const key = `${code}:${next.roundId}`;
@@ -441,11 +444,11 @@ async function connect(code) {
         confirmedVotes = { ...next.votes }; voteSoundRound = key;
         if (caughtSpyCue(confirmedRoom, next)) {
           void playSpyCaught();
-          notice('A spy was caught. Votes reset—keep looking for the others.');
+          notice(t("A spy was caught. Votes reset—keep looking for the others."));
         }
         confirmedRoom = next;
       }
-      if (next.status === 'lobby' && inRound(state.room)) notice('Round stopped. You’re back in the lobby.');
+      if (next.status === 'lobby' && inRound(state.room)) notice(t("Round stopped. You’re back in the lobby."));
       if (next.status === 'ended' && inRound(state.room) && next.roundId === state.room.roundId) pendingWinSound = `${code}:${next.roundId}`;
       if (next.roundId !== state.room?.roundId || next.status !== state.room?.status) { state.reveal = false; $('#confirm').close(); }
       state.room = next; state.loading = false; render();
@@ -474,13 +477,13 @@ async function resolveAccusation() {
 }
 function confirmAction(title, text, label, task, player = null) {
   const dialog = $('#confirm');
-  renderHtml(dialog, `<form method="dialog"><span class="eyebrow">MAKE YOUR MOVE</span><h2>${esc(title)}</h2>${player ? `<div class="named-player"><span class="avatar portrait">${playerAvatar(player)}</span><strong>${esc(player.name)}</strong></div>` : ''}<p>${esc(text)}</p><button class="button primary full" id="confirm-action" type="button">${esc(label)}</button><button class="button quiet full" value="cancel">Not yet</button></form>`);
+  renderHtml(dialog, `<form method="dialog"><span class="eyebrow">${t("MAKE YOUR MOVE")}</span><h2>${esc(t(title))}</h2>${player ? `<div class="named-player"><span class="avatar portrait">${playerAvatar(player)}</span><strong><bdi>${esc(player.name)}</bdi></strong></div>` : ''}<p>${esc(t(text))}</p><button class="button primary full" id="confirm-action" type="button">${esc(t(label))}</button><button class="button quiet full" value="cancel">${t("Not yet")}</button></form>`);
   dialog.showModal();
   $('#confirm-action').onclick = () => { dialog.close(); void run(task); };
 }
 async function run(task) {
   if (state.busy) return;
-  if (!navigator.onLine) { notice('You’re offline. Reconnect to make your move.'); return; }
+  if (!navigator.onLine) { notice(t("You’re offline. Reconnect to make your move.")); return; }
   state.busy = true; notice('');
   document.querySelectorAll('button').forEach(b => { b.disabled = true; });
   try { await task(); } catch (error) { notice(errorMessage(error)); }
@@ -493,11 +496,11 @@ async function action(type, extra = {}) {
   if (event) trackUsage(event, { ...context, roundId: context.roundId + (type === 'start' ? 1 : 0) });
   return result;
 }
-function getName() { const name = $('#entry-name')?.value.trim(); if (!name) throw new Error('Enter your name first.'); savedName = name; try { localStorage.setItem('spyfall-name', name); } catch {} return name; }
+function getName() { const name = $('#entry-name')?.value.trim(); if (!name) throw new Error(t("Enter your name first.")); savedName = name; try { localStorage.setItem('spyfall-name', name); } catch {} return name; }
 function roleContent(role) {
-  if (!role) return '<strong class="role-title">Retrieving your role…</strong><span class="role-note">Your secret briefing is on its way.</span>';
-  if (!state.reveal) return '<strong class="role-title">For your eyes only.</strong><span class="role-note">Hold to reveal · release to hide</span>';
-  return `<span class="role-label">${role.isSpy ? 'YOUR MISSION' : 'YOU ARE NOT THE SPY'}</span><strong class="role-title">${role.isSpy ? 'You’re the spy.' : esc(role.location)}</strong><span class="role-note">${role.isSpy ? 'Blend in. Guess the location.' : 'Keep this location secret.'}</span>`;
+  if (!role) return `<strong class="role-title">${t("Retrieving your role…")}</strong><span class="role-note">${t("Your secret briefing is on its way.")}</span>`;
+  if (!state.reveal) return `<strong class="role-title">${t("For your eyes only.")}</strong><span class="role-note">${t("Hold to reveal · release to hide")}</span>`;
+  return `<span class="role-label">${role.isSpy ? t("YOUR MISSION") : t("YOU ARE NOT THE SPY")}</span><strong class="role-title">${role.isSpy ? t("You’re the spy.") : esc(locationName(role.location))}</strong><span class="role-note">${role.isSpy ? t("Blend in. Guess the location.") : t("Keep this location secret.")}</span>`;
 }
 function concealRole() {
   heldPointer = null; heldKey = null;
@@ -534,6 +537,19 @@ window.addEventListener('blur', concealRole);
 document.addEventListener('pointerdown', () => { void unlockSound(); }, { passive: true });
 document.addEventListener('keydown', () => { void unlockSound(); });
 $('#app').addEventListener('change', event => {
+  if (event.target.id === 'language') {
+    const picker = event.target, code = picker.value;
+    if ($('#rules-form')) state.draft = readRulesForm();
+    const pendingLocation = $('#new-location')?.value || '';
+    picker.disabled = true; concealRole();
+    void setLanguage(code).then(changed => {
+      if (!changed) return;
+      applyDocumentLanguage(); render();
+      if ($('#new-location')) $('#new-location').value = pendingLocation;
+      trackUsage('language_changed');
+    }).catch(error => { picker.disabled = false; picker.value = getLanguage(); reportError(error); });
+    return;
+  }
   if (event.target.id === 'spies') { state.draft = readRulesForm(); updateLobbyReadiness(); return; }
   if (event.target.id !== 'location-set') return;
   const selected = LOCATION_SETS.find(set => set.id === event.target.value);
@@ -547,49 +563,49 @@ $('#app').addEventListener('input', event => {
   if (event.target.id === 'code') { event.target.value = event.target.value.toUpperCase(); state.code = event.target.value; }
   if (event.target.closest('#rules-form')) {
     state.draft = readRulesForm();
-    $('#minutes-label').textContent = `${state.draft.minutes} min`;
+    $('#minutes-label').textContent = t("{v0} min", { v0: state.draft.minutes });
     $('#minutes').style.setProperty('--range-progress', `${(state.draft.minutes - 2) / 18 * 100}%`);
-    $('#minutes').setAttribute('aria-valuetext', `${state.draft.minutes} minutes`);
+    $('#minutes').setAttribute('aria-valuetext', t("{v0} minutes", { v0: state.draft.minutes }));
     updateLobbyReadiness();
   }
 });
 $('#app').addEventListener('submit', event => {
   event.preventDefault();
   if (event.target.id === 'join-form') void run(async () => { const code = $('#code').value.trim().toUpperCase(); const name = getName(); await callGame({ action: 'join', code, name }); trackUsage('room_joined', { roomCode: code }); await connect(code); });
-  if (event.target.id === 'rules-form') void run(async () => { if ($('#new-location').value.trim()) throw new Error('Press Add to include your new location before saving.'); await action('settings', { settings: readRulesForm() }); state.draft = null; state.tab = 'players'; focusPlayers = true; notice('Rules saved. Your locations will be used in your next room.'); });
+  if (event.target.id === 'rules-form') void run(async () => { if ($('#new-location').value.trim()) throw new Error(t("Press Add to include your new location before saving.")); await action('settings', { settings: readRulesForm() }); state.draft = null; state.tab = 'players'; focusPlayers = true; notice(t("Rules saved. Your locations will be used in your next room.")); });
 });
 $('#app').addEventListener('click', event => {
   const button = event.target.closest('[data-action]'); if (!button) return;
   if (button.tagName === 'A') event.preventDefault();
   const type = button.dataset.action;
   if (type === 'scores') { void showLeaderboard().catch(reportError); return; }
-  if (type === 'more-questions') { trackUsage('question_idea'); questionIndex = (questionIndex + 1) % QUESTION_IDEAS.length; $('#question-text').textContent = QUESTION_IDEAS[questionIndex]; return; }
+  if (type === 'more-questions') { trackUsage('question_idea'); questionIndex = (questionIndex + 1) % QUESTION_IDEAS.length; $('#question-text').textContent = questionText(QUESTION_IDEAS[questionIndex]); return; }
   if (type === 'rename') return showProfileEditor();
   if (type === 'account') { void showAccount().catch(reportError); return; }
   if (type === 'google') { void signInGoogle('home').catch(reportError); return; }
   if (type === 'end-round') {
-    confirmAction('End this round?', 'Any spies still in play win. The timer is only a guide—you decide when time is up.', 'End round', () => action('end'));
-    const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'button quiet full'; cancel.textContent = 'Cancel round without scores';
-    cancel.onclick = () => { $('#confirm').close(); confirmAction('Cancel this round?', 'Everyone returns to the lobby. No scores are recorded.', 'Cancel round', () => action('stop')); };
+    confirmAction(t("End this round?"), t("Any spies still in play win. The timer is only a guide—you decide when time is up."), t("End round"), () => action('end'));
+    const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'button quiet full'; cancel.textContent = t("Cancel round without scores");
+    cancel.onclick = () => { $('#confirm').close(); confirmAction(t("Cancel this round?"), t("Everyone returns to the lobby. No scores are recorded."), t("Cancel round"), () => action('stop')); };
     $('#confirm form').append(cancel);
     return;
   }
-  if (type === 'exit-room') return confirmAction('Exit the room?', state.room.status === 'lobby' ? 'You can rejoin using the room code. If you are hosting, the next player becomes host.' : 'This will return everyone to the lobby and reset the round. If you are hosting, the next player becomes host.', 'Exit room', async () => { await action('leave'); disconnect(); state.code = ''; history.replaceState(null, '', '/'); render(); });
-  if (type === 'sound') { toggleSound(); renderHtml(button, soundIcon()); button.setAttribute('aria-pressed', String(soundEnabled())); button.title = soundEnabled() ? 'Mute sound' : 'Enable sound'; return; }
+  if (type === 'exit-room') return confirmAction(t("Exit the room?"), state.room.status === 'lobby' ? t("You can rejoin using the room code. If you are hosting, the next player becomes host.") : t("This will return everyone to the lobby and reset the round. If you are hosting, the next player becomes host."), t("Exit room"), async () => { await action('leave'); disconnect(); state.code = ''; history.replaceState(null, '', '/'); render(); });
+  if (type === 'sound') { toggleSound(); renderHtml(button, soundIcon()); button.setAttribute('aria-pressed', String(soundEnabled())); button.title = soundEnabled() ? t("Mute sound") : t("Enable sound"); return; }
   if (type === 'add-location' || type === 'remove-location') return editLocation(type, Number(button.dataset.index));
   if (type === 'refresh-result') return void loadResult();
   if (type === 'create') return void run(async () => { const { code } = await callGame({ action: 'create', name: getName() }); trackUsage('room_created', { roomCode: code }); await connect(code); });
   if (type === 'players' || type === 'rules') { state.tab = type; render(); return; }
   if (type === 'home') { disconnect(); history.replaceState(null, '', '/'); state.code = ''; render(); return; }
-  if (type === 'share') return void run(async () => { try { await navigator.clipboard.writeText(inviteUrl()); trackUsage('invite_copied'); notice('Invite link copied. Send it to your friends.'); } catch { notice(`Invite link: ${inviteUrl()}`); } });
-  if (type === 'vote') { const player = state.room.players.find(p => p.id === button.dataset.target); return confirmAction('Accuse this player?', 'If enough players agree, their role is checked. Catch every spy to win. A wrong accusation lets the spies win.', 'Cast my vote', () => action('vote', { target: player.id }), player); }
+  if (type === 'share') return void run(async () => { try { await navigator.clipboard.writeText(inviteUrl()); trackUsage('invite_copied'); notice(t("Invite link copied. Send it to your friends.")); } catch { notice(t("Invite link: {v0}", { v0: inviteUrl() })); } });
+  if (type === 'vote') { const player = state.room.players.find(p => p.id === button.dataset.target); return confirmAction(t("Accuse this player?"), t("If enough players agree, their role is checked. Catch every spy to win. A wrong accusation lets the spies win."), t("Cast my vote"), () => action('vote', { target: player.id }), player); }
   if (type === 'guess') {
-    if (!state.role?.isSpy) { notice('Only the spy can submit a location guess. Tap a player above to vote.'); return; }
-    return confirmAction(`Guess ${button.dataset.location}?`, 'This is your only guess. Get it wrong and the other players win.', 'Lock in my guess', () => action('guess', { location: button.dataset.location }));
+    if (!state.role?.isSpy) { notice(t("Only the spy can submit a location guess. Tap a player above to vote.")); return; }
+    return confirmAction(t('Guess {location}?', { location: locationName(button.dataset.location) }), t("This is your only guess. Get it wrong and the other players win."), t("Lock in my guess"), () => action('guess', { location: button.dataset.location }));
   }
-  if (type === 'remove') return confirmAction('Remove this player?', 'They can rejoin using the room code while the lobby is open.', 'Remove player', () => action('remove', { target: button.dataset.target }), state.room.players.find(p => p.id === button.dataset.target));
+  if (type === 'remove') return confirmAction(t("Remove this player?"), t("They can rejoin using the room code while the lobby is open."), t("Remove player"), () => action('remove', { target: button.dataset.target }), state.room.players.find(p => p.id === button.dataset.target));
   if (type === 'leave') return void run(async () => { await action('leave'); disconnect(); state.code = ''; history.replaceState(null, '', '/'); render(); });
-  if (type === 'start' && state.draft) { notice('Save your game rules before starting.'); state.tab = 'rules'; render(); return; }
+  if (type === 'start' && state.draft) { notice(t("Save your game rules before starting.")); state.tab = 'rules'; render(); return; }
   if (['start', 'reset'].includes(type)) void run(() => action(type));
 });
 function updateClock() {
@@ -607,26 +623,27 @@ function updateClock() {
   const guidance = $('#timer-guidance');
   if (guidance) {
     guidance.hidden = seconds > 60;
-    guidance.textContent = seconds === 0 ? 'Time’s up. Keep playing—the host decides when to end the round.' : 'One minute left. Time to vote for your suspects.';
+    guidance.textContent = seconds === 0 ? t("Time’s up. Keep playing—the host decides when to end the round.") : t("One minute left. Time to vote for your suspects.");
   }
 }
 document.addEventListener('visibilitychange', () => { if (document.hidden) concealRole(); else updateClock(); });
-window.addEventListener('offline', () => notice('You’re offline. Your place is saved; reconnect to keep playing.'));
-window.addEventListener('online', () => { notice('Back online.'); updateClock(); });
+window.addEventListener('offline', () => notice(t("You’re offline. Your place is saved; reconnect to keep playing.")));
+window.addEventListener('online', () => { notice(t("Back online.")); updateClock(); });
 setInterval(updateClock, 1000);
 state.loading = Boolean(state.code);
 render();
 // QR and invite links enter the room automatically; the name can be edited in the lobby.
 const initialConnectionVersion = connectionVersion;
-identity().then(async user => {
+Promise.all([identity(), setLanguage(preferredLanguage())]).then(async ([user]) => {
+  applyDocumentLanguage();
   state.uid = user.uid; startUsage(user.uid); lastScreen = '';
   await refreshProfile(user);
   if (connectionVersion !== initialConnectionVersion) return;
   if (initialRoomCode && state.code === initialRoomCode) {
-    if (!/^[A-Z2-9]{6}$/.test(initialRoomCode)) throw new Error('That invite has an invalid room code.');
+    if (!/^[A-Z2-9]{6}$/.test(initialRoomCode)) throw new Error(t("That invite has an invalid room code."));
     const snap = await getDoc(doc(db, 'rooms', initialRoomCode));
     if (connectionVersion !== initialConnectionVersion) return;
-    if (!snap.exists()) throw new Error('That room does not exist. Check the invite link.');
+    if (!snap.exists()) throw new Error(t("That room does not exist. Check the invite link."));
     if (!snap.data().memberIds.includes(user.uid)) {
       const codename = () => `Agent ${crypto.randomUUID().slice(0, 6).toUpperCase()}`;
       let name = savedName || codename();
