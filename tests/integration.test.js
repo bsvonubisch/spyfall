@@ -87,13 +87,15 @@ test('only a verified Google account with an admin claim can query admin data, w
   const admin = ownerDb();
   // The email is not an authorization rule; only a privileged service can assign the claim.
   const renamed = env.authenticatedContext('renamed-admin', { ...ownerClaims, email: 'changed@example.com' }).firestore();
-  await assertSucceeds(getDocs(collection(renamed, 'rooms')));
+  const renamedRooms = await assertSucceeds(getDocs(collection(renamed, 'rooms')));
+  assert.deepEqual(renamedRooms.docs.map(room => room.id), [code]);
   for (const path of ['profiles', 'rooms', 'results', 'usage', 'presence']) await assertSucceeds(getDocs(collection(admin, path)));
   await assertFails(getDoc(doc(admin, 'rooms', code, 'roles', spy.id)));
   await assertFails(getDoc(doc(admin, 'rooms', code, 'secrets', 'current')));
   // A newly linked anonymous identity may retain its original sign-in provider in the token.
   const linked = env.authenticatedContext('owner', { ...ownerClaims, firebase: { ...ownerClaims.firebase, sign_in_provider: 'anonymous' } }).firestore();
-  await assertSucceeds(getDocs(collection(linked, 'rooms')));
+  const linkedRooms = await assertSucceeds(getDocs(collection(linked, 'rooms')));
+  assert.deepEqual(linkedRooms.docs.map(room => room.id), [code]);
 });
 test('Google photos persist through rooms and awards; changing a profile cannot change its scores', async () => {
   const photo = 'https://lh3.googleusercontent.com/a/test-photo=s96-c';

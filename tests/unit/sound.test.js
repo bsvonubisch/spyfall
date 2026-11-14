@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 test('all admin previews unlock audio on the first gesture and respect mute and visibility', async () => {
   const keys = ['window', 'document', 'localStorage', 'fetch'];
   const previous = Object.fromEntries(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
-  let started = 0, resumed = 0;
+  let started = 0, resumed = 0, failRecording = false;
   const recordings = [];
   const storage = new Map();
   const parameter = { setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} };
@@ -13,7 +13,7 @@ test('all admin previews unlock audio on the first gesture and respect mute and 
     state = 'suspended'; currentTime = 0; destination = {};
     async resume() { resumed++; this.state = 'running'; }
     async decodeAudioData(bytes) { return { asset: new TextDecoder().decode(bytes) }; }
-    createBufferSource() { return source(); }
+    createBufferSource() { if (failRecording) throw new Error('Audio device closed'); return source(); }
     createOscillator() { return source(); }
     createGain() { return { connect() {}, disconnect() {}, gain: { ...parameter } }; }
   }
@@ -32,6 +32,9 @@ test('all admin previews unlock audio on the first gesture and respect mute and 
     assert.equal(resumed, 1);
     assert.ok(recordings[0].endsWith('/spy-chord.mp3'));
     assert.ok(recordings[1].endsWith('/spy-caught.mp3'), 'a caught spy uses its own recording');
+    failRecording = true;
+    assert.equal(await sound.previewSound('spy-caught'), false, 'audio errors report failure instead of rejecting a background promise');
+    failRecording = false;
     assert.equal(storage.size, 0, 'previewing must not change the saved sound preference');
     sound.toggleSound();
     const before = started;
@@ -39,6 +42,9 @@ test('all admin previews unlock audio on the first gesture and respect mute and 
     assert.equal(await sound.previewSound('spy-caught'), false);
     assert.equal(started, before);
     assert.equal(sound.soundEnabled(), false);
+    assert.equal(sound.playVote(), false);
+    assert.equal(sound.playTimeout(), false);
+    assert.equal(sound.playVotingSoon(), false);
     sound.toggleSound();
     document.hidden = true;
     assert.equal(await sound.previewSound('spy-win'), false);

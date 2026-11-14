@@ -302,7 +302,7 @@ input:not([type=range]):focus, textarea:focus, select:focus { outline: 2px solid
 .google-signin .google-logo { width: 32px; height: 32px; }
 .profile-google { margin-top: 16px; }
 .name-field { position: relative; margin-bottom: 12px; }
-.name-field input#name { margin: 0; padding-right: 58px; }
+.name-field input#entry-name { margin: 0; padding-right: 58px; }
 .input-account { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; border: 0; border-radius: 9px; background: none; display: grid; place-items: center; }
 .input-account .google-logo { width: 36px; height: 36px; }
 .input-account:hover { background: #bad6ff15; }

@@ -1,5 +1,6 @@
 import './style.css';
 import './game-table.css';
+import { renderHtml, appendHtml, escapeHtml as esc } from './render-html.js';
 import QRCode from 'qrcode';
 import { doc, onSnapshot, getDoc, getDocs, collection, query, orderBy, limit } from 'firebase/firestore';
 import { onIdTokenChanged } from 'firebase/auth';
@@ -21,7 +22,6 @@ import { startUsage, stopUsage, trackUsage, usageScreen } from './usage.js';
 
 const $ = selector => document.querySelector(selector);
 bindDialogViewport($('#confirm'));
-const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const icon = (name, size = 20) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${({eye:'<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',arrow:'<path d="M4 12h16m-6-6 6 6-6 6"/>',plus:'<path d="M12 5v14M5 12h14"/>',users:'<circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2m1-15a3 3 0 0 1 0 6m2 3a5 5 0 0 1 3 4v2"/>',clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',lock:'<rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',check:'<path d="m5 12 4 4L19 6"/>',copy:'<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/>',pin:'<path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 0 1 14 0Z"/><circle cx="12" cy="10" r="2"/>',exit:'<path d="M9 4H4v16h5m5-12 4 4-4 4m-5-4h11"/>'})[name] || ''}</svg>`;
 const initialRoomCode = new URLSearchParams(location.search).get('room')?.toUpperCase() || '';
 const state = { code: initialRoomCode, room: null, role: null, uid: null, tab: 'players', reveal: false, busy: false, loading: false, draft: null, stops: [], clockOffset: 0 };
@@ -57,10 +57,10 @@ async function showLeaderboard(scope = state.room ? 'room' : 'overall') {
   trackUsage('leaderboard_opened');
   const dialog = $('#confirm'), code = state.code;
   const roomAvailable = Boolean(state.room);
-  dialog.innerHTML = `<h2>Leaderboards</h2><div class="tabs score-tabs" role="tablist" aria-label="Leaderboard">${roomAvailable ? `<button role="tab" data-scope="room" aria-selected="${scope === 'room'}">This room</button>` : ''}<button role="tab" data-scope="overall" aria-selected="${scope === 'overall'}">Overall</button></div><div id="scores-content" aria-live="polite"><p>Loading standings…</p></div><button class="button quiet full" id="close-scores">Close</button>`;
+  renderHtml(dialog, `<h2>Leaderboards</h2><div class="tabs score-tabs" role="tablist" aria-label="Leaderboard">${roomAvailable ? `<button role="tab" data-scope="room" aria-selected="${scope === 'room'}">This room</button>` : ''}<button role="tab" data-scope="overall" aria-selected="${scope === 'overall'}">Overall</button></div><div id="scores-content" aria-live="polite"><p>Loading standings…</p></div><button class="button quiet full" id="close-scores">Close</button>`);
   if (!dialog.open) dialog.showModal();
   $('#close-scores').onclick = () => dialog.close();
-  dialog.querySelectorAll('[data-scope]').forEach(button => { button.onclick = () => showLeaderboard(button.dataset.scope); });
+  dialog.querySelectorAll('[data-scope]').forEach(button => { button.onclick = () => { void showLeaderboard(button.dataset.scope).catch(reportError); }; });
   const content = $('#scores-content');
   try {
     const user = await identity();
@@ -76,10 +76,10 @@ async function showLeaderboard(scope = state.room ? 'room' : 'overall') {
     if (!dialog.open || $('#scores-content') !== content) return;
     let rank = 0;
     const row = (p, position) => `<div class="score-row ${p.id === user.uid ? 'your-score' : ''}"><span class="score-rank">${position}</span><span class="avatar portrait">${playerAvatar(p)}</span><span class="score-name">${esc(scope === 'room' ? state.room?.players.find(player => player.id === p.id)?.name || p.name : p.name)}${p.id === user.uid ? ' <small>(you)</small>' : ''}<small>${p.gamesPlayed} ${p.gamesPlayed === 1 ? 'round' : 'rounds'} · ${Math.round(p.wins / p.gamesPlayed * 100)}% wins</small></span><strong>${p.wins}<small>${p.wins === 1 ? 'point' : 'points'}</small></strong></div>`;
-    content.innerHTML = `<p class="score-explainer">1 point per team win. Every completed round counts.</p>${entries.length ? `<div class="score-list">${entries.map((p, i) => { if (!i || p.wins !== entries[i - 1].wins) rank = i + 1; return row(p, rank); }).join('')}</div>` : '<p class="score-empty">No scores yet. Finish a round to get on the board.</p>'}${own.exists() && own.data().gamesPlayed && !entries.some(p => p.id === user.uid) ? `<p class="fineprint">Your total</p>${row(own.data(), '—')}` : ''}<p class="fineprint score-identity">${scope === 'overall' ? 'Top 25 players. ' : ''}${googleAccount(user) ? 'Your profile follows your Google account.' : 'Your guest profile belongs to this browser. Connect Google from your profile to keep it across devices.'}</p>`;
+    renderHtml(content, `<p class="score-explainer">1 point per team win. Every completed round counts.</p>${entries.length ? `<div class="score-list">${entries.map((p, i) => { if (!i || p.wins !== entries[i - 1].wins) rank = i + 1; return row(p, rank); }).join('')}</div>` : '<p class="score-empty">No scores yet. Finish a round to get on the board.</p>'}${own.exists() && own.data().gamesPlayed && !entries.some(p => p.id === user.uid) ? `<p class="fineprint">Your total</p>${row(own.data(), '—')}` : ''}<p class="fineprint score-identity">${scope === 'overall' ? 'Top 25 players. ' : ''}${googleAccount(user) ? 'Your profile follows your Google account.' : 'Your guest profile belongs to this browser. Connect Google from your profile to keep it across devices.'}</p>`);
   } catch (error) {
-    if ($('#scores-content') === content) content.innerHTML = `<p>${esc(errorMessage(error))}</p><button class="button secondary full" id="retry-scores">Try again</button>`;
-    $('#retry-scores')?.addEventListener('click', () => showLeaderboard(scope));
+    if ($('#scores-content') === content) renderHtml(content, `<p>${esc(errorMessage(error))}</p><button class="button secondary full" id="retry-scores">Try again</button>`);
+    $('#retry-scores')?.addEventListener('click', () => { void showLeaderboard(scope).catch(reportError); });
   }
 }
 const inRound = r => ['active', 'accusing'].includes(r?.status);
@@ -122,18 +122,18 @@ async function signInGoogle(source = 'account') {
     const result = await request;
     if (result.credential) {
       const dialog = $('#confirm');
-      dialog.innerHTML = '<h2>Use your saved Google profile?</h2><p>This account already has a profile. Switching will leave this room. Your guest scores and saved locations stay with the guest profile; they will not be merged.</p><button class="button primary full" id="switch-account">Use Google profile</button><button class="button quiet full" id="keep-guest">Keep playing as guest</button>';
+      renderHtml(dialog, '<h2>Use your saved Google profile?</h2><p>This account already has a profile. Switching will leave this room. Your guest scores and saved locations stay with the guest profile; they will not be merged.</p><button class="button primary full" id="switch-account">Use Google profile</button><button class="button quiet full" id="keep-guest">Keep playing as guest</button>');
       if (!dialog.open) dialog.showModal();
       $('#keep-guest').onclick = () => dialog.close();
       $('#switch-account').onclick = () => {
         dialog.close();
-        run(async () => {
+        void run(async () => {
           accountChanging = true;
           try {
             if (state.room) await action('leave');
             stopUsage(); disconnect(); state.code = ''; history.replaceState(null, '', '/');
             await completeGoogleSession(await useGoogleAccount(result.credential));
-            if (source !== 'home') showAccount();
+            if (source !== 'home') await showAccount();
             else notice('Google connected. Your profile is ready.');
           } finally { accountChanging = false; }
         });
@@ -142,9 +142,9 @@ async function signInGoogle(source = 'account') {
     }
     await completeGoogleSession(result.user);
     if (source === 'profile') showProfileEditor();
-    else if (source !== 'home') showAccount();
+    else if (source !== 'home') await showAccount();
     else notice('Google connected. Your profile is ready.');
-  } catch (error) { notice(error.code?.startsWith('auth/') ? accountError(error) : errorMessage(error)); if (source !== 'home') showAccount(); }
+  } catch (error) { notice(error.code?.startsWith('auth/') ? accountError(error) : errorMessage(error)); if (source !== 'home') await showAccount(); }
   finally { accountChanging = false; state.busy = false; render(); $('#confirm').querySelectorAll('button').forEach(button => { button.disabled = false; }); }
 }
 async function showAccount(checkAdmin = true) {
@@ -154,10 +154,10 @@ async function showAccount(checkAdmin = true) {
   if (allowed) return showAdmin();
   concealRole();
   const connected = googleAccount(user), editable = canChangeAccount(), dialog = $('#confirm');
-  dialog.innerHTML = `<span class="eyebrow">YOUR ACCOUNT</span><h2>${connected ? 'Welcome back.' : 'Keep your identity.'}</h2><p>${connected ? `Signed in as ${esc(user.email)}. Your profile and saved locations follow your Google account.` : 'Guest play stays free and needs no account. Connect Google to keep your profile, scores, and saved locations across devices.'}</p>${connected ? `<button class="button secondary full" id="account-profile" ${!editable ? 'disabled' : ''}>Edit profile</button><button class="button quiet full" id="account-signout" ${!editable ? 'disabled' : ''}>Sign out</button>` : `<button class="button google-signin full" data-login-google ${!editable ? 'disabled' : ''}>${googleLogo} Continue with Google</button>`}${!editable ? '<p class="fineprint">Return to the lobby to change your account or profile.</p>' : ''}<button class="button quiet full" id="close-account">${connected ? 'Close' : 'Keep playing as guest'}</button>`;
+  renderHtml(dialog, `<span class="eyebrow">YOUR ACCOUNT</span><h2>${connected ? 'Welcome back.' : 'Keep your identity.'}</h2><p>${connected ? `Signed in as ${esc(user.email)}. Your profile and saved locations follow your Google account.` : 'Guest play stays free and needs no account. Connect Google to keep your profile, scores, and saved locations across devices.'}</p>${connected ? `<button class="button secondary full" id="account-profile" ${!editable ? 'disabled' : ''}>Edit profile</button><button class="button quiet full" id="account-signout" ${!editable ? 'disabled' : ''}>Sign out</button>` : `<button class="button google-signin full" data-login-google ${!editable ? 'disabled' : ''}>${googleLogo} Continue with Google</button>`}${!editable ? '<p class="fineprint">Return to the lobby to change your account or profile.</p>' : ''}<button class="button quiet full" id="close-account">${connected ? 'Close' : 'Keep playing as guest'}</button>`);
   if (!dialog.open) dialog.showModal();
   $('#close-account').onclick = () => dialog.close();
-  $('[data-login-google]')?.addEventListener('click', () => signInGoogle());
+  $('[data-login-google]')?.addEventListener('click', () => { void signInGoogle().catch(reportError); });
   $('#account-profile')?.addEventListener('click', showProfileEditor);
   $('#account-signout')?.addEventListener('click', signOutAccount);
 }
@@ -182,11 +182,11 @@ async function showAdmin(force = false) {
   concealRole();
   const dialog = $('#confirm');
   stopAdminLive?.();
-  dialog.innerHTML = `<div class="section-heading"><span class="eyebrow">ADMIN AREA</span><button class="text-button" id="refresh-admin">Refresh</button></div><h2>The whole game.</h2><div id="admin-live" class="admin-live" aria-live="polite">Connecting to live activity…</div><p class="fineprint">Live means a visible app checked in during the last 3 minutes. Multiple tabs count as one player.</p><section class="admin-sounds" aria-labelledby="sound-tests-heading"><h3 id="sound-tests-heading">Sound check</h3><div class="sound-test-grid">${SOUND_PREVIEWS.map(cue => `<button type="button" class="button outline" data-preview-sound="${cue.id}">${cue.label}</button>`).join('')}</div><p class="fineprint" id="sound-preview-status" role="status">Preview sounds on this device.</p></section><div id="admin-content" aria-live="polite"><p>Loading game stats…</p></div><button class="button primary full" id="close-admin">Back to game</button><button class="button quiet full" id="admin-signout">Sign out</button>`;
+  renderHtml(dialog, `<div class="section-heading"><span class="eyebrow">ADMIN AREA</span><button class="text-button" id="refresh-admin">Refresh</button></div><h2>The whole game.</h2><div id="admin-live" class="admin-live" aria-live="polite">Connecting to live activity…</div><p class="fineprint">Live means a visible app checked in during the last 3 minutes. Multiple tabs count as one player.</p><section class="admin-sounds" aria-labelledby="sound-tests-heading"><h3 id="sound-tests-heading">Sound check</h3><div class="sound-test-grid">${SOUND_PREVIEWS.map(cue => `<button type="button" class="button outline" data-preview-sound="${cue.id}">${cue.label}</button>`).join('')}</div><p class="fineprint" id="sound-preview-status" role="status">Preview sounds on this device.</p></section><div id="admin-content" aria-live="polite"><p>Loading game stats…</p></div><button class="button primary full" id="close-admin">Back to game</button><button class="button quiet full" id="admin-signout">Sign out</button>`);
   if (!dialog.open) dialog.showModal();
   const content = $('#admin-content');
   $('#close-admin').onclick = () => dialog.close();
-  $('#refresh-admin').onclick = () => showAdmin(true);
+  $('#refresh-admin').onclick = () => { void showAdmin(true).catch(reportError); };
   $('#admin-signout').onclick = signOutAccount;
   $('#admin-signout').disabled = !canChangeAccount();
   dialog.querySelectorAll('[data-preview-sound]').forEach(button => {
@@ -202,7 +202,7 @@ async function showAdmin(force = false) {
   });
   stopAdminLive = watchLiveStats(db, live => {
     if (!dialog.open || !$('#admin-live')) return;
-    $('#admin-live').innerHTML = `<span class="dot"></span><span><strong>${live.users}${live.capped ? '+' : ''}</strong> live players</span><span><strong>${live.rooms}${live.capped ? '+' : ''}</strong> live rooms</span>`;
+    renderHtml($('#admin-live'), `<span class="dot"></span><span><strong>${live.users}${live.capped ? '+' : ''}</strong> live players</span><span><strong>${live.rooms}${live.capped ? '+' : ''}</strong> live rooms</span>`);
   }, () => { if ($('#admin-live')) $('#admin-live').textContent = 'Live activity is unavailable. Refresh to retry.'; });
   try {
     if (force || !adminStats || Date.now() - adminStats.loadedAt > 60000) {
@@ -213,31 +213,31 @@ async function showAdmin(force = false) {
     const stats = adminStats;
     const metric = (label, value) => `<div class="admin-metric"><strong>${Number(value).toLocaleString()}</strong><span>${label}</span></div>`;
     const status = room => Date.now() - room.createdAt.toMillis() > 86400000 ? 'Expired' : ({lobby:'Lobby',active:'Playing',accusing:'Voting',ended:'Finished'})[room.status] || room.status;
-    content.innerHTML = `<div class="admin-metrics">${metric('Player profiles', stats.players)}${metric('Completed rounds', stats.rounds)}${metric('Rounds · last 7 days', stats.weekly)}${metric('Recent rooms · 24 hours', stats.dailyRooms)}</div><p class="fineprint">Profiles include guests. Completed rounds come from saved results. Room counts exclude rooms deleted when the last player leaves.</p><h3>Recent rooms</h3><div class="admin-rooms">${stats.rooms.length ? stats.rooms.map(room => `<div class="admin-room"><strong>${esc(room.code)}</strong><span>${room.memberIds.length} players · ${esc(status(room))}</span><small>${room.createdAt.toDate().toLocaleDateString()}</small></div>`).join('') : '<p>No rooms yet.</p>'}</div><h3>Most active players</h3>${stats.leaders.length ? stats.leaders.map(player => `<div class="score-row"><span class="avatar portrait">${playerAvatar(player)}</span><span class="score-name">${esc(player.name)}<small>${player.gamesPlayed} rounds · ${player.wins} wins</small></span></div>`).join('') : '<p>No completed rounds yet.</p>'}<p class="fineprint">Updated ${new Date(stats.loadedAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}. Latest 12 rooms and top 5 players.</p>`;
+    renderHtml(content, `<div class="admin-metrics">${metric('Player profiles', stats.players)}${metric('Completed rounds', stats.rounds)}${metric('Rounds · last 7 days', stats.weekly)}${metric('Recent rooms · 24 hours', stats.dailyRooms)}</div><p class="fineprint">Profiles include guests. Completed rounds come from saved results. Room counts exclude rooms deleted when the last player leaves.</p><h3>Recent rooms</h3><div class="admin-rooms">${stats.rooms.length ? stats.rooms.map(room => `<div class="admin-room"><strong>${esc(room.code)}</strong><span>${room.memberIds.length} players · ${esc(status(room))}</span><small>${room.createdAt.toDate().toLocaleDateString()}</small></div>`).join('') : '<p>No rooms yet.</p>'}</div><h3>Most active players</h3>${stats.leaders.length ? stats.leaders.map(player => `<div class="score-row"><span class="avatar portrait">${playerAvatar(player)}</span><span class="score-name">${esc(player.name)}<small>${player.gamesPlayed} rounds · ${player.wins} wins</small></span></div>`).join('') : '<p>No completed rounds yet.</p>'}<p class="fineprint">Updated ${new Date(stats.loadedAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}. Latest 12 rooms and top 5 players.</p>`);
     const peak = Math.max(1, ...stats.days.map(day => day.count));
-    content.insertAdjacentHTML('beforeend', `<h3>Activity · last 7 days</h3><div class="usage-chart" role="img" aria-label="Daily usage event counts">${stats.days.map(day => `<div class="usage-day"><strong>${day.count}</strong><i style="height:${Math.round(day.count / peak * 70)}px"></i><span>${new Date(day.date).toLocaleDateString([], {weekday:'short'})}</span></div>`).join('')}</div><h3>Usage totals</h3>${stats.usage.map(item => `<div class="usage-row"><span>${item.label}</span><strong>${item.count.toLocaleString()}</strong></div>`).join('')}<p class="fineprint">Usage events are recorded from this update onward. Recoverable room creations are backfilled; earlier visits, votes, and guesses were not recorded. Secret roles and answers are never included.</p>`);
+    appendHtml(content, `<h3>Activity · last 7 days</h3><div class="usage-chart" role="img" aria-label="Daily usage event counts">${stats.days.map(day => `<div class="usage-day"><strong>${day.count}</strong><i style="height:${Math.round(day.count / peak * 70)}px"></i><span>${new Date(day.date).toLocaleDateString([], {weekday:'short'})}</span></div>`).join('')}</div><h3>Usage totals</h3>${stats.usage.map(item => `<div class="usage-row"><span>${item.label}</span><strong>${item.count.toLocaleString()}</strong></div>`).join('')}<p class="fineprint">Usage events are recorded from this update onward. Recoverable room creations are backfilled; earlier visits, votes, and guesses were not recorded. Secret roles and answers are never included.</p>`);
   } catch (error) {
-    if ($('#admin-content') === content) content.innerHTML = `<p>${esc(errorMessage(error))}</p><p class="fineprint">Admin access requires the verified owner’s Google account.</p>`;
+    if ($('#admin-content') === content) renderHtml(content, `<p>${esc(errorMessage(error))}</p><p class="fineprint">Admin access requires the verified owner’s Google account.</p>`);
   }
 }
 function showProfileEditor() {
   if (!canChangeAccount()) return notice('Profiles can be changed in the lobby.');
   const user = auth.currentUser;
-  if (!user) return showAccount();
+  if (!user) { void showAccount().catch(reportError); return; }
   const dialog = $('#confirm'), player = ownProfile || state.room?.players.find(p => p.id === state.uid) || { id: user.uid, name: savedName || 'Agent' };
   const connected = googleAccount(user);
   let avatarSeed = player.avatarSeed || player.id, avatarUrl = connected ? googleProfile(user, player).avatarUrl : player.avatarUrl || '';
-  dialog.innerHTML = `<form id="rename-form"><h2>Your agent profile</h2><div class="avatar-editor"><span class="avatar portrait" id="profile-avatar">${playerAvatar({ ...player, avatarSeed, avatarUrl })}</span>${connected ? '<span class="fineprint">Google profile photo</span>' : '<button type="button" class="button secondary" id="regenerate-avatar">New avatar</button>'}</div><label for="player-name">NAME</label><input id="player-name" maxlength="20" required autocomplete="nickname" value="${esc(player.name)}">${connected ? `<p class="account-identity">Connected to ${esc(user.email)}</p>` : `<button type="button" class="button google-signin full profile-google" data-login-google>${googleLogo} Connect Google</button><p class="fineprint">Use your Google name and photo, and keep your profile across devices.</p>`}<button class="button primary full name-save" type="submit">Save profile ${icon('check')}</button><button class="button quiet full" type="button" id="cancel-name">Cancel</button></form>`;
+  renderHtml(dialog, `<form id="rename-form"><h2>Your agent profile</h2><div class="avatar-editor"><span class="avatar portrait" id="profile-avatar">${playerAvatar({ ...player, avatarSeed, avatarUrl })}</span>${connected ? '<span class="fineprint">Google profile photo</span>' : '<button type="button" class="button secondary" id="regenerate-avatar">New avatar</button>'}</div><label for="player-name">NAME</label><input id="player-name" maxlength="20" required autocomplete="nickname" value="${esc(player.name)}">${connected ? `<p class="account-identity">Connected to ${esc(user.email)}</p>` : `<button type="button" class="button google-signin full profile-google" data-login-google>${googleLogo} Connect Google</button><p class="fineprint">Use your Google name and photo, and keep your profile across devices.</p>`}<button class="button primary full name-save" type="submit">Save profile ${icon('check')}</button><button class="button quiet full" type="button" id="cancel-name">Cancel</button></form>`);
   if (!dialog.open) dialog.showModal();
-  $('#regenerate-avatar')?.addEventListener('click', () => { avatarSeed = crypto.randomUUID(); avatarUrl = ''; $('#profile-avatar').innerHTML = avatar(avatarSeed); });
-  $('[data-login-google]')?.addEventListener('click', () => signInGoogle('profile'));
+  $('#regenerate-avatar')?.addEventListener('click', () => { avatarSeed = crypto.randomUUID(); avatarUrl = ''; renderHtml($('#profile-avatar'), avatar(avatarSeed)); });
+  $('[data-login-google]')?.addEventListener('click', () => { void signInGoogle('profile').catch(reportError); });
   $('#cancel-name').onclick = () => dialog.close();
   $('#rename-form').onsubmit = event => {
     event.preventDefault();
     const name = $('#player-name').value.trim();
     if (!name) { $('#player-name').focus(); return; }
     dialog.close();
-    run(async () => {
+    void run(async () => {
       if (state.room) await action('rename', { name, avatarSeed, avatarUrl });
       else await updateProfile(db, user.uid, { name, avatarSeed, avatarUrl });
       rememberName(name); await refreshProfile(user); trackUsage('profile_saved'); notice('Profile saved.');
@@ -253,6 +253,7 @@ function errorMessage(error) {
   if (error.code === 'permission-denied') return 'That action wasn’t allowed. The round may have changed; check your connection and try again.';
   return error.message || 'Something went wrong. Please try again.';
 }
+function reportError(error) { notice(errorMessage(error)); }
 function header() {
   const r = state.room, active = inRound(r);
   return `<header class="floating-nav ${active ? 'in-round' : ''}">
@@ -275,7 +276,7 @@ function shell(content) {
   const usageView = state.room ? (inRound(state.room) ? 'round' : state.room.status === 'ended' ? 'result' : 'lobby') : state.loading ? 'loading' : 'home';
   usageScreen(usageView, state.room ? state.code : '');
   if (entered) trackUsage('screen_view', { screen: usageView, roundId: state.room?.roundId || 0 });
-  $('#app').innerHTML = `<div class="shell game-table">${header()}<main class="${entered ? 'screen-enter' : ''}">${content}</main><footer><button type="button" class="footer-credit" data-action="account" aria-label="Open account">made with <span class="footer-heart" role="img" aria-label="love">♥</span> by vonUbisch</button></footer></div>`;
+  renderHtml($('#app'), `<div class="shell game-table">${header()}<main class="${entered ? 'screen-enter' : ''}">${content}</main><footer><button type="button" class="footer-credit" data-action="account" aria-label="Open account">made with <span class="footer-heart" role="img" aria-label="love">♥</span> by vonUbisch</button></footer></div>`);
   document.querySelectorAll('[data-player-id]').forEach((row, index) => {
     if (entered || !lastPlayerIds.includes(row.dataset.playerId)) { row.classList.add('player-enter'); row.style.setProperty('--arrival', `${Math.min(index, 5) * 45}ms`); }
     if (!entered && row.dataset.vote !== lastVotes[row.dataset.playerId]) row.querySelector('.player-meta')?.classList.add('vote-updated');
@@ -296,7 +297,7 @@ function homeAccount() {
   return `<button class="input-account" type="button" data-action="google" aria-label="Continue with Google" title="Continue with Google">${googleLogo}</button>`;
 }
 function home() {
-  shell(`<section class="hero"><div class="eyebrow"><span class="dot"></span> SAME ROOM. SEPARATE PHONES.</div><h1>Good friends.<br><em>Great liars.</em></h1><p>One secret location. Spies in your midst.<br>Find out who’s hiding in plain sight.</p><div class="hero-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="agent agent-one">${icon('eye', 44)}</div><div class="agent agent-two">${icon('eye', 44)}</div><div class="agent agent-three">?</div><span class="art-note">trust no one.</span><span class="spark">✳</span></div><div class="facts"><span>${icon('users', 16)}2–15 players</span><span>${icon('clock', 16)}2–20 minutes</span><span>1–3 spies.</span></div></section><section class="panel entry"><label for="name">WHAT SHOULD WE CALL YOU?</label><div class="name-field"><input id="name" maxlength="20" autocomplete="nickname" placeholder="Your name" value="${esc(savedName)}">${homeAccount()}</div><button class="button primary" data-action="create">Create a room ${icon('plus')}</button><div class="divider"><span>or join your friends</span></div><form id="join-form"><label class="sr-only" for="code">Room code</label><div class="join-row"><input id="code" maxlength="6" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="ROOM CODE" value="${esc(state.code)}" required pattern="[A-Za-z2-9]{6}"><button class="button secondary" type="submit">Join ${icon('arrow')}</button></div></form><p class="fineprint">Got a QR code? Scan it with your phone’s camera.</p></section><button class="text-button leaderboard-link" data-action="scores">View overall leaderboard</button><section class="how"><div class="section-heading"><h2>A quick briefing</h2><span>01—03</span></div><div class="step"><span>01</span><div><h3>Get your secret</h3><p>Everyone learns the location. Except the spies.</p></div></div><div class="step"><span>02</span><div><h3>Ask. Answer. Act natural.</h3><p>Question each other out loud. Be specific enough to fit in, vague enough to keep the secret.</p></div></div><div class="step"><span>03</span><div><h3>Make your move</h3><p>Vote out the spy, or guess the location if you are one. Watch the clock.</p></div></div></section>`);
+  shell(`<section class="hero"><div class="eyebrow"><span class="dot"></span> SAME ROOM. SEPARATE PHONES.</div><h1>Good friends.<br><em>Great liars.</em></h1><p>One secret location. Spies in your midst.<br>Find out who’s hiding in plain sight.</p><div class="hero-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="agent agent-one">${icon('eye', 44)}</div><div class="agent agent-two">${icon('eye', 44)}</div><div class="agent agent-three">?</div><span class="art-note">trust no one.</span><span class="spark">✳</span></div><div class="facts"><span>${icon('users', 16)}2–15 players</span><span>${icon('clock', 16)}2–20 minutes</span><span>1–3 spies.</span></div></section><section class="panel entry"><label for="entry-name">WHAT SHOULD WE CALL YOU?</label><div class="name-field"><input id="entry-name" maxlength="20" autocomplete="nickname" placeholder="Your name" value="${esc(savedName)}">${homeAccount()}</div><button class="button primary" data-action="create">Create a room ${icon('plus')}</button><div class="divider"><span>or join your friends</span></div><form id="join-form"><label class="sr-only" for="code">Room code</label><div class="join-row"><input id="code" maxlength="6" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="ROOM CODE" value="${esc(state.code)}" required pattern="[A-Za-z2-9]{6}"><button class="button secondary" type="submit">Join ${icon('arrow')}</button></div></form><p class="fineprint">Got a QR code? Scan it with your phone’s camera.</p></section><button class="text-button leaderboard-link" data-action="scores">View overall leaderboard</button><section class="how"><div class="section-heading"><h2>A quick briefing</h2><span>01—03</span></div><div class="step"><span>01</span><div><h3>Get your secret</h3><p>Everyone learns the location. Except the spies.</p></div></div><div class="step"><span>02</span><div><h3>Ask. Answer. Act natural.</h3><p>Question each other out loud. Be specific enough to fit in, vague enough to keep the secret.</p></div></div><div class="step"><span>03</span><div><h3>Make your move</h3><p>Vote out the spy, or guess the location if you are one. Watch the clock.</p></div></div></section>`);
 }
 function playerList(voting = false) {
   const r = state.room;
@@ -409,8 +410,8 @@ async function loadResult() {
       if (pendingWinSound === `${code}:${roundId}`) {
         pendingWinSound = null;
         const cue = resultCue(state.room.result);
-        if (cue === 'spy-caught') playSpyCaught();
-        else if (cue === 'spy-win') playSpyWin();
+        if (cue === 'spy-caught') void playSpyCaught();
+        else if (cue === 'spy-win') void playSpyWin();
         else playTimeout();
       }
       render();
@@ -439,7 +440,7 @@ async function connect(code) {
         if (voteSoundRound === key && confirmedVotes && Object.entries(next.votes).some(([id, target]) => target !== confirmedVotes[id])) playVote();
         confirmedVotes = { ...next.votes }; voteSoundRound = key;
         if (caughtSpyCue(confirmedRoom, next)) {
-          playSpyCaught();
+          void playSpyCaught();
           notice('A spy was caught. Votes reset—keep looking for the others.');
         }
         confirmedRoom = next;
@@ -460,8 +461,8 @@ async function connect(code) {
         notice(errorMessage(error));
       });
       if (!inRound(next) && stopRole) { stopRole(); stopRole = null; state.role = null; }
-      if (next.status === 'ended') loadResult();
-      if (next.status === 'accusing' && !snap.metadata.hasPendingWrites) resolveAccusation();
+      if (next.status === 'ended') void loadResult();
+      if (next.status === 'accusing' && !snap.metadata.hasPendingWrites) void resolveAccusation();
     }, error => { if (version !== connectionVersion) return; disconnect(); render(); notice(errorMessage(error)); }));
   } catch (error) { if (version !== connectionVersion) return; disconnect(); render(); notice(errorMessage(error)); }
 }
@@ -473,9 +474,9 @@ async function resolveAccusation() {
 }
 function confirmAction(title, text, label, task, player = null) {
   const dialog = $('#confirm');
-  dialog.innerHTML = `<form method="dialog"><span class="eyebrow">MAKE YOUR MOVE</span><h2>${esc(title)}</h2>${player ? `<div class="named-player"><span class="avatar portrait">${playerAvatar(player)}</span><strong>${esc(player.name)}</strong></div>` : ''}<p>${esc(text)}</p><button class="button primary full" id="confirm-action" type="button">${esc(label)}</button><button class="button quiet full" value="cancel">Not yet</button></form>`;
+  renderHtml(dialog, `<form method="dialog"><span class="eyebrow">MAKE YOUR MOVE</span><h2>${esc(title)}</h2>${player ? `<div class="named-player"><span class="avatar portrait">${playerAvatar(player)}</span><strong>${esc(player.name)}</strong></div>` : ''}<p>${esc(text)}</p><button class="button primary full" id="confirm-action" type="button">${esc(label)}</button><button class="button quiet full" value="cancel">Not yet</button></form>`);
   dialog.showModal();
-  $('#confirm-action').onclick = () => { dialog.close(); run(task); };
+  $('#confirm-action').onclick = () => { dialog.close(); void run(task); };
 }
 async function run(task) {
   if (state.busy) return;
@@ -492,7 +493,7 @@ async function action(type, extra = {}) {
   if (event) trackUsage(event, { ...context, roundId: context.roundId + (type === 'start' ? 1 : 0) });
   return result;
 }
-function getName() { const name = $('#name')?.value.trim(); if (!name) throw new Error('Enter your name first.'); savedName = name; try { localStorage.setItem('spyfall-name', name); } catch {} return name; }
+function getName() { const name = $('#entry-name')?.value.trim(); if (!name) throw new Error('Enter your name first.'); savedName = name; try { localStorage.setItem('spyfall-name', name); } catch {} return name; }
 function roleContent(role) {
   if (!role) return '<strong class="role-title">Retrieving your role…</strong><span class="role-note">Your secret briefing is on its way.</span>';
   if (!state.reveal) return '<strong class="role-title">For your eyes only.</strong><span class="role-note">Hold to reveal · release to hide</span>';
@@ -507,7 +508,7 @@ function setRoleRevealed(reveal) {
   state.reveal = Boolean(reveal && inRound(state.room) && state.role?.roundId === state.room.roundId);
   if (state.reveal && !wasRevealed) trackUsage('role_revealed', { roundId: state.room.roundId });
   const card = $('#role-card'), content = $('#role-content'), button = $('#reveal-role');
-  if (content) content.innerHTML = roleContent(state.role?.roundId === state.room?.roundId ? state.role : null);
+  if (content) renderHtml(content, roleContent(state.role?.roundId === state.room?.roundId ? state.role : null));
   card?.classList.toggle('spy-card', Boolean(state.reveal && state.role?.isSpy));
   card?.classList.toggle('is-revealed', state.reveal);
   button?.setAttribute('aria-pressed', String(state.reveal));
@@ -530,8 +531,8 @@ window.addEventListener('keyup', event => { if (event.key === heldKey) { event.p
 $('#app').addEventListener('focusout', event => { if (event.target.id === 'reveal-role') concealRole(); });
 $('#app').addEventListener('contextmenu', event => { if (event.target.closest('#reveal-role')) event.preventDefault(); });
 window.addEventListener('blur', concealRole);
-document.addEventListener('pointerdown', unlockSound, { passive: true });
-document.addEventListener('keydown', unlockSound);
+document.addEventListener('pointerdown', () => { void unlockSound(); }, { passive: true });
+document.addEventListener('keydown', () => { void unlockSound(); });
 $('#app').addEventListener('change', event => {
   if (event.target.id === 'spies') { state.draft = readRulesForm(); updateLobbyReadiness(); return; }
   if (event.target.id !== 'location-set') return;
@@ -542,7 +543,7 @@ $('#app').addEventListener('change', event => {
   render();
 });
 $('#app').addEventListener('input', event => {
-  if (event.target.id === 'name') savedName = event.target.value;
+  if (event.target.id === 'entry-name') savedName = event.target.value;
   if (event.target.id === 'code') { event.target.value = event.target.value.toUpperCase(); state.code = event.target.value; }
   if (event.target.closest('#rules-form')) {
     state.draft = readRulesForm();
@@ -554,18 +555,18 @@ $('#app').addEventListener('input', event => {
 });
 $('#app').addEventListener('submit', event => {
   event.preventDefault();
-  if (event.target.id === 'join-form') run(async () => { const code = $('#code').value.trim().toUpperCase(); const name = getName(); await callGame({ action: 'join', code, name }); trackUsage('room_joined', { roomCode: code }); await connect(code); });
-  if (event.target.id === 'rules-form') run(async () => { if ($('#new-location').value.trim()) throw new Error('Press Add to include your new location before saving.'); await action('settings', { settings: readRulesForm() }); state.draft = null; state.tab = 'players'; focusPlayers = true; notice('Rules saved. Your locations will be used in your next room.'); });
+  if (event.target.id === 'join-form') void run(async () => { const code = $('#code').value.trim().toUpperCase(); const name = getName(); await callGame({ action: 'join', code, name }); trackUsage('room_joined', { roomCode: code }); await connect(code); });
+  if (event.target.id === 'rules-form') void run(async () => { if ($('#new-location').value.trim()) throw new Error('Press Add to include your new location before saving.'); await action('settings', { settings: readRulesForm() }); state.draft = null; state.tab = 'players'; focusPlayers = true; notice('Rules saved. Your locations will be used in your next room.'); });
 });
 $('#app').addEventListener('click', event => {
   const button = event.target.closest('[data-action]'); if (!button) return;
   if (button.tagName === 'A') event.preventDefault();
   const type = button.dataset.action;
-  if (type === 'scores') return showLeaderboard();
+  if (type === 'scores') { void showLeaderboard().catch(reportError); return; }
   if (type === 'more-questions') { trackUsage('question_idea'); questionIndex = (questionIndex + 1) % QUESTION_IDEAS.length; $('#question-text').textContent = QUESTION_IDEAS[questionIndex]; return; }
   if (type === 'rename') return showProfileEditor();
-  if (type === 'account') return showAccount();
-  if (type === 'google') return signInGoogle('home');
+  if (type === 'account') { void showAccount().catch(reportError); return; }
+  if (type === 'google') { void signInGoogle('home').catch(reportError); return; }
   if (type === 'end-round') {
     confirmAction('End this round?', 'Any spies still in play win. The timer is only a guide—you decide when time is up.', 'End round', () => action('end'));
     const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'button quiet full'; cancel.textContent = 'Cancel round without scores';
@@ -574,29 +575,29 @@ $('#app').addEventListener('click', event => {
     return;
   }
   if (type === 'exit-room') return confirmAction('Exit the room?', state.room.status === 'lobby' ? 'You can rejoin using the room code. If you are hosting, the next player becomes host.' : 'This will return everyone to the lobby and reset the round. If you are hosting, the next player becomes host.', 'Exit room', async () => { await action('leave'); disconnect(); state.code = ''; history.replaceState(null, '', '/'); render(); });
-  if (type === 'sound') { toggleSound(); button.innerHTML = soundIcon(); button.setAttribute('aria-pressed', String(soundEnabled())); button.title = soundEnabled() ? 'Mute sound' : 'Enable sound'; return; }
+  if (type === 'sound') { toggleSound(); renderHtml(button, soundIcon()); button.setAttribute('aria-pressed', String(soundEnabled())); button.title = soundEnabled() ? 'Mute sound' : 'Enable sound'; return; }
   if (type === 'add-location' || type === 'remove-location') return editLocation(type, Number(button.dataset.index));
-  if (type === 'refresh-result') return loadResult();
-  if (type === 'create') return run(async () => { const { code } = await callGame({ action: 'create', name: getName() }); trackUsage('room_created', { roomCode: code }); await connect(code); });
+  if (type === 'refresh-result') return void loadResult();
+  if (type === 'create') return void run(async () => { const { code } = await callGame({ action: 'create', name: getName() }); trackUsage('room_created', { roomCode: code }); await connect(code); });
   if (type === 'players' || type === 'rules') { state.tab = type; render(); return; }
   if (type === 'home') { disconnect(); history.replaceState(null, '', '/'); state.code = ''; render(); return; }
-  if (type === 'share') return run(async () => { try { await navigator.clipboard.writeText(inviteUrl()); trackUsage('invite_copied'); notice('Invite link copied. Send it to your friends.'); } catch { notice(`Invite link: ${inviteUrl()}`); } });
+  if (type === 'share') return void run(async () => { try { await navigator.clipboard.writeText(inviteUrl()); trackUsage('invite_copied'); notice('Invite link copied. Send it to your friends.'); } catch { notice(`Invite link: ${inviteUrl()}`); } });
   if (type === 'vote') { const player = state.room.players.find(p => p.id === button.dataset.target); return confirmAction('Accuse this player?', 'If enough players agree, their role is checked. Catch every spy to win. A wrong accusation lets the spies win.', 'Cast my vote', () => action('vote', { target: player.id }), player); }
   if (type === 'guess') {
     if (!state.role?.isSpy) { notice('Only the spy can submit a location guess. Tap a player above to vote.'); return; }
     return confirmAction(`Guess ${button.dataset.location}?`, 'This is your only guess. Get it wrong and the other players win.', 'Lock in my guess', () => action('guess', { location: button.dataset.location }));
   }
   if (type === 'remove') return confirmAction('Remove this player?', 'They can rejoin using the room code while the lobby is open.', 'Remove player', () => action('remove', { target: button.dataset.target }), state.room.players.find(p => p.id === button.dataset.target));
-  if (type === 'leave') return run(async () => { await action('leave'); disconnect(); state.code = ''; history.replaceState(null, '', '/'); render(); });
+  if (type === 'leave') return void run(async () => { await action('leave'); disconnect(); state.code = ''; history.replaceState(null, '', '/'); render(); });
   if (type === 'start' && state.draft) { notice('Save your game rules before starting.'); state.tab = 'rules'; render(); return; }
-  if (['start', 'reset'].includes(type)) run(() => action(type));
+  if (['start', 'reset'].includes(type)) void run(() => action(type));
 });
 function updateClock() {
   const r = state.room; if (!inRound(r)) return;
   const seconds = Math.max(0, Math.ceil((r.endsAt - Date.now() - state.clockOffset) / 1000));
   const timer = $('#timer');
   if (timer) { timer.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`; timer.classList.toggle('urgent', seconds < 30); }
-  if (r.status === 'accusing') resolveAccusation();
+  if (r.status === 'accusing') void resolveAccusation();
   const key = `${state.code}:${r.roundId}`;
   if (clockRound !== key) { clockRound = key; previousSeconds = null; }
   const cue = clockCue(previousSeconds, seconds);
