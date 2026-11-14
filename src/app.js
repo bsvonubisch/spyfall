@@ -400,7 +400,7 @@ async function loadResult() {
   } catch (error) { notice(errorMessage(error)); }
 }
 async function connect(code) {
-  disconnect(); state.code = code; state.loading = true; render();
+  disconnect(); state.tab = 'players'; state.code = code; state.loading = true; render();
   const version = connectionVersion;
   history.replaceState(null, '', `?room=${encodeURIComponent(code)}`);
   try {
