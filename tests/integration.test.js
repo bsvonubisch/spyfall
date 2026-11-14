@@ -63,8 +63,12 @@ test('linking a Google identity retains the guest UID, profile, and saved locati
     await assertFails(getDoc(doc(db('other'), 'profiles', linked.uid, 'preferences', 'identity')));
     await assertFails(setDoc(doc(db('other'), 'profiles', linked.uid, 'preferences', 'identity'), { googleProfileApplied: true, updatedAt: serverTimestamp() }));
     await updateProfile(firestore, linked.uid, { name: 'My codename', avatarSeed: 'my-new-avatar', avatarUrl: '' });
-    const custom = await syncGoogleProfile(firestore, providerOnly);
-    assert.equal(custom.name, 'My codename'); assert.equal(custom.avatarUrl, ''); assert.equal(custom.avatarSeed, 'my-new-avatar');
+    const custom = await syncGoogleProfile(firestore, providerOnly, { code });
+    assert.equal(custom.name, 'My codename'); assert.equal(custom.avatarUrl, imported.avatarUrl);
+    assert.equal((await getDoc(doc(firestore, 'rooms', code))).data().players[linked.uid].name, 'My codename');
+    assert.equal((await getDoc(doc(firestore, 'rooms', code))).data().players[linked.uid].avatarUrl, imported.avatarUrl);
+    const unchanged = await syncGoogleProfile(firestore, providerOnly);
+    assert.equal(unchanged.name, 'My codename'); assert.equal(unchanged.avatarUrl, imported.avatarUrl);
     const reconnected = await syncGoogleProfile(firestore, providerOnly, { force: true, code });
     assert.equal(reconnected.name, 'Google test'); assert.equal(reconnected.gamesPlayed, 0);
     assert.deepEqual((await getDoc(doc(firestore, 'profiles', linked.uid, 'preferences', 'game'))).data().locations, locations);

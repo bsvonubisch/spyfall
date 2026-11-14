@@ -259,34 +259,34 @@ dialog p { color: #adbed8; }
   .vote-button.selected { outline: 2px solid Highlight; }
 }
 
-/* Translucent navy glass: visible ambient light, bright rims, and layered depth. */
+/* Translucent navy glass with a single, fine rim and layered depth. */
 body { background: #081427; isolation: isolate; }
 body::before { content: ''; position: fixed; inset: 0; pointer-events: none; z-index: -1; background: radial-gradient(ellipse 390px 430px at calc(50% - 140px) 16%, #426bb27a, transparent 78%), radial-gradient(ellipse 350px 380px at calc(50% + 210px) 53%, #4789b05e, transparent 78%), radial-gradient(ellipse 400px 420px at calc(50% - 160px) 94%, #6664a85e, transparent 75%), linear-gradient(145deg, #11213c, #0a172b 65%, #16233d); }
 .shell { background: transparent; }
-.floating-nav { background: linear-gradient(125deg, #d6e9ff22, #8ba6da0b 50%, #d9ecff18), #11244055; border-color: #e5f0ff54; backdrop-filter: blur(32px) saturate(170%); -webkit-backdrop-filter: blur(32px) saturate(170%); box-shadow: inset 0 1px 1px #ffffff6b, inset 0 -1px 0 #b0cbff20, 0 12px 32px #020a1a40; border-radius: 24px; }
-.panel:not(.player-grid), .question-ideas, .waiting-host { background: linear-gradient(135deg, #c7ddff23, #d6e6ff0a 46%, #abcfff16), #13243e3b; border: 1px solid #d4e6ff38; border-top-color: #e5f0ff70; border-left-color: #d4e6ff4a; box-shadow: inset 0 1px 0 #ffffff24, inset 0 -1px 0 #bad5ff12, 0 16px 40px #010a1d25; backdrop-filter: blur(24px) saturate(150%); -webkit-backdrop-filter: blur(24px) saturate(150%); border-radius: 24px; }
+.floating-nav { background: linear-gradient(125deg, #d6e9ff22, #8ba6da0b 50%, #d9ecff18), #11244055; border-color: #e5f0ff54; backdrop-filter: blur(32px) saturate(170%); -webkit-backdrop-filter: blur(32px) saturate(170%); box-shadow: 0 12px 32px #020a1a40; border-radius: 24px; }
+.panel:not(.player-grid), .question-ideas, .waiting-host { background: linear-gradient(135deg, #c7ddff23, #d6e6ff0a 46%, #abcfff16), #13243e3b; border: 1px solid #d4e6ff38; border-top-color: #e5f0ff45; border-left-color: #d4e6ff4a; box-shadow: 0 16px 40px #010a1d25; backdrop-filter: blur(24px) saturate(150%); -webkit-backdrop-filter: blur(24px) saturate(150%); border-radius: 24px; }
 .roster.player-grid { box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
-.lobby-tabs, .score-tabs { border: 1px solid #d4e6ff2c; background: #09182c40; padding: 4px; gap: 4px; border-radius: 16px; box-shadow: inset 0 1px 4px #020b2033; }
+.lobby-tabs, .score-tabs { border: 1px solid #d4e6ff2c; background: #09182c40; padding: 4px; gap: 4px; border-radius: 16px; box-shadow: none; }
 .lobby-tabs button, .lobby-tabs button:last-child, .score-tabs button { justify-content: center; border: 0; border-radius: 12px; padding: 10px 5px; min-height: 44px; font-size: 12px; }
-.lobby-tabs button[aria-selected=true], .score-tabs button[aria-selected=true] { background: linear-gradient(150deg, #c9deff29, #9cbcea13); box-shadow: inset 0 1px 0 #ffffff57, 0 3px 10px #020c2038; color: #fff; }
+.lobby-tabs button[aria-selected=true], .score-tabs button[aria-selected=true] { background: linear-gradient(150deg, #c9deff29, #9cbcea13); border: 1px solid #dceaff28; box-shadow: 0 3px 10px #020c2038; color: #fff; }
 .button { border-radius: 16px; transition: transform .2s cubic-bezier(.2,.8,.2,1), background .2s, box-shadow .2s; }
-.primary { background: linear-gradient(135deg, #ffb199, #ff8d70 50%, #ff9c7e); box-shadow: inset 0 1px 0 #fff4, inset 0 -1px 0 #a9474440, 0 8px 20px #b1503b25; }
+.primary { background: linear-gradient(135deg, #ffb199, #ff8d70 50%, #ff9c7e); border: 1px solid #ffdfd13d; box-shadow: 0 8px 20px #b1503b25; }
 .primary:hover { background: linear-gradient(135deg, #ffc0ac, #ffa086 60%, #ffad93); }
-.secondary, .button.outline { background: linear-gradient(135deg, #c1dbff26, #9fbff70c); color: var(--ink); border: 1px solid #dae9ff38; box-shadow: inset 0 1px 0 #ffffff40, 0 4px 14px #030e201c; }
+.secondary, .button.outline { background: linear-gradient(135deg, #c1dbff26, #9fbff70c); color: var(--ink); border: 1px solid #dae9ff38; box-shadow: 0 4px 14px #030e201c; }
 .secondary:hover, .button.outline:hover { background: #c6dcff2e; }
-.role-card { background: linear-gradient(125deg, #e6f1ff36, #b4d4ff16 48%, #d7eaff27); color: #f3f7ff; border: 1px solid #eaf4ff52; border-top-color: #f6faff85; box-shadow: inset 0 1px 1px #ffffff40, 0 10px 28px #02102b30; backdrop-filter: blur(20px) saturate(150%); -webkit-backdrop-filter: blur(20px) saturate(150%); border-radius: 22px; }
+.role-card { background: linear-gradient(125deg, #e6f1ff36, #b4d4ff16 48%, #d7eaff27); color: #f3f7ff; border: 1px solid #eaf4ff52; border-top-color: #f6faff52; box-shadow: 0 10px 28px #02102b30; backdrop-filter: blur(20px) saturate(150%); -webkit-backdrop-filter: blur(20px) saturate(150%); border-radius: 22px; }
 .role-note { color: #c2d4ee; }
 .role-card.spy-card { background: linear-gradient(130deg, #ffb99d3b, #e9ae9e14 50%, #ffb99d24); color: #fff1e9; border-color: #ffd8c86b; }
 .spy-card .role-note { color: #f5cebc; }
-.guess-grid button, .location-chips > span { background: linear-gradient(140deg, #bdd7ff1f, #bcd9ff08); border: 1px solid #d6e7ff2e; color: #edf5ff; box-shadow: inset 0 1px 0 #e0eeff20, 0 2px 6px #050d2015; border-radius: 13px; }
+.guess-grid button, .location-chips > span { background: linear-gradient(140deg, #bdd7ff1f, #bcd9ff08); border: 1px solid #d6e7ff2e; color: #edf5ff; box-shadow: 0 2px 6px #050d2015; border-radius: 13px; }
 .nav-icon { border-radius: 50%; }
-.floating-nav .room-tag { background: #d0e2ff14; border: 1px solid #deedff24; box-shadow: inset 0 1px 0 #e7f4ff14; }
+.floating-nav .room-tag { background: #d0e2ff14; border: 1px solid #deedff24; box-shadow: none; }
 .player-grid .avatar.portrait { box-shadow: 0 0 0 1px #f0f6ff40, 0 8px 18px #030e2045; }
-dialog { background: linear-gradient(140deg, #c5ddff29, #a7c3f010 55%, #d1e4ff1f), #14253bbc; border-color: #e4efff59; border-top-color: #f0f7ff8a; backdrop-filter: blur(36px) saturate(170%); -webkit-backdrop-filter: blur(36px) saturate(170%); box-shadow: inset 0 1px 1px #ffffff40, inset 0 -1px 0 #e0edff15, 0 28px 90px #01081880; border-radius: 28px; }
+dialog { background: linear-gradient(140deg, #c5ddff29, #a7c3f010 55%, #d1e4ff1f), #14253bbc; border-color: #e4efff59; border-top-color: #f0f7ff59; backdrop-filter: blur(36px) saturate(170%); -webkit-backdrop-filter: blur(36px) saturate(170%); box-shadow: 0 28px 90px #01081880; border-radius: 28px; }
 dialog::backdrop { backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); background: #040d205c; }
-input:not([type=range]), textarea, select { background-color: #06152838; border-color: #d6e7ff36; border-radius: 14px; box-shadow: inset 0 1px 5px #030a1c25, 0 1px 0 #e3eeff0a; }
+input:not([type=range]), textarea, select { background-color: #06152838; border-color: #d6e7ff36; border-radius: 14px; box-shadow: none; }
 input:not([type=range]):focus, textarea:focus, select:focus { outline: 2px solid #a8ccff; outline-offset: 2px; border-color: #d4e7ff6b; }
-.agent { background: linear-gradient(135deg, #e2efff65, #b2d2ff22); color: #eff6ff; border-color: #e4f2ff70; box-shadow: inset 0 1px 1px #fff8, inset 0 -2px 2px #34587d33, 4px 8px 18px #020d2445; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.agent { background: linear-gradient(135deg, #e2efff65, #b2d2ff22); color: #eff6ff; border: 1px solid #e4f2ff70; box-shadow: 4px 8px 18px #020d2445; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
 .agent-two { background: linear-gradient(135deg, #b4d3ff65, #81a8df22); }
 .agent-three { color: #10213c; background: linear-gradient(135deg, #ffc3aa, #ff9878dd); border-color: #ffd6c29c; }
 .invite canvas { box-shadow: 0 4px 18px #030e2026; }
@@ -324,3 +324,64 @@ dialog:has(#admin-content) { max-width: 500px; }
 .usage-day i { display: block; width: 100%; background: #86aff0; border-radius: 4px 4px 0 0; min-height: 2px; }
 .usage-day strong { color: var(--ink); font-weight: 500; }
 @supports not (backdrop-filter: blur(1px)) { .floating-nav, dialog { background-color: #1c304deb; } }
+
+/* Explicit track/thumb styling avoids platform-specific native slider rendering. */
+.settings input[type=range] {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 44px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  --range-track: linear-gradient(to right, #a8c8fc var(--range-progress, 0%), #60779766 var(--range-progress, 0%));
+}
+.settings input[type=range]::-webkit-slider-runnable-track {
+  height: 6px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--range-track);
+}
+.settings input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 24px;
+  height: 24px;
+  margin-top: -9px;
+  border: 1px solid #e7f1ff;
+  border-radius: 50%;
+  background: #e7f1ff;
+  box-shadow: 0 2px 8px #020a1b55;
+}
+.settings input[type=range]::-moz-range-track {
+  height: 6px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--range-track);
+}
+.settings input[type=range]::-moz-range-thumb {
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
+  border: 1px solid #e7f1ff;
+  border-radius: 50%;
+  background: #e7f1ff;
+  box-shadow: 0 2px 8px #020a1b55;
+}
+.settings input[type=range]:focus { outline: none; }
+.settings input[type=range]:focus-visible { outline: 2px solid #a8ccff; outline-offset: 3px; border-radius: 12px; }
+.avatar-editor .fineprint { margin: 0; }
+.settings select { color-scheme: dark; font-size: 13px; }
+select option, select optgroup { background: #142741; color: #f3f7ff; }
+select option:checked { background: #355782; color: #fff; }
+@media (forced-colors: active) {
+  select option, select optgroup { background: Canvas; color: CanvasText; }
+  select option:checked { background: Highlight; color: HighlightText; }
+  .settings input[type=range] { --range-track: CanvasText; forced-color-adjust: none; }
+  .settings input[type=range]::-webkit-slider-thumb { background: Highlight; border-color: Canvas; }
+  .settings input[type=range]::-moz-range-thumb { background: Highlight; border-color: Canvas; }
+  .settings input[type=range]:focus-visible { outline-color: Highlight; }
+}

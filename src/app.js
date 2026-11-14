@@ -204,12 +204,12 @@ function showProfileEditor() {
   if (!canChangeAccount()) return notice('Profiles can be changed in the lobby.');
   const user = auth.currentUser;
   if (!user) return showAccount();
-  const dialog = $('#confirm'), player = state.room?.players.find(p => p.id === state.uid) || ownProfile || { id: user.uid, name: savedName || 'Agent' };
-  let avatarSeed = player.avatarSeed || player.id, avatarUrl = player.avatarUrl || '';
-  dialog.innerHTML = `<form id="rename-form"><h2>Your agent profile</h2><div class="avatar-editor"><span class="avatar portrait" id="profile-avatar">${playerAvatar(player)}</span><button type="button" class="button secondary" id="regenerate-avatar">New avatar</button></div><label for="player-name">NAME</label><input id="player-name" maxlength="20" required autocomplete="nickname" value="${esc(player.name)}">${googleAccount(user) ? `<p class="account-identity">Connected to ${esc(user.email)}</p><button type="button" class="button outline full" id="use-google-profile">Use Google name & photo</button>` : `<button type="button" class="button google-signin full profile-google" data-login-google>${googleLogo} Connect Google</button><p class="fineprint">Use your Google name and photo, and keep your profile across devices.</p>`}<button class="button primary full name-save" type="submit">Save profile ${icon('check')}</button><button class="button quiet full" type="button" id="cancel-name">Cancel</button></form>`;
+  const dialog = $('#confirm'), player = ownProfile || state.room?.players.find(p => p.id === state.uid) || { id: user.uid, name: savedName || 'Agent' };
+  const connected = googleAccount(user);
+  let avatarSeed = player.avatarSeed || player.id, avatarUrl = connected ? googleProfile(user, player).avatarUrl : player.avatarUrl || '';
+  dialog.innerHTML = `<form id="rename-form"><h2>Your agent profile</h2><div class="avatar-editor"><span class="avatar portrait" id="profile-avatar">${playerAvatar({ ...player, avatarSeed, avatarUrl })}</span>${connected ? '<span class="fineprint">Google profile photo</span>' : '<button type="button" class="button secondary" id="regenerate-avatar">New avatar</button>'}</div><label for="player-name">NAME</label><input id="player-name" maxlength="20" required autocomplete="nickname" value="${esc(player.name)}">${connected ? `<p class="account-identity">Connected to ${esc(user.email)}</p>` : `<button type="button" class="button google-signin full profile-google" data-login-google>${googleLogo} Connect Google</button><p class="fineprint">Use your Google name and photo, and keep your profile across devices.</p>`}<button class="button primary full name-save" type="submit">Save profile ${icon('check')}</button><button class="button quiet full" type="button" id="cancel-name">Cancel</button></form>`;
   if (!dialog.open) dialog.showModal();
-  $('#regenerate-avatar').onclick = () => { avatarSeed = crypto.randomUUID(); avatarUrl = ''; $('#profile-avatar').innerHTML = avatar(avatarSeed); };
-  $('#use-google-profile')?.addEventListener('click', () => { const profile = googleProfile(user); avatarUrl = profile.avatarUrl; $('#player-name').value = profile.name; $('#profile-avatar').innerHTML = playerAvatar({ ...player, avatarSeed, avatarUrl }); });
+  $('#regenerate-avatar')?.addEventListener('click', () => { avatarSeed = crypto.randomUUID(); avatarUrl = ''; $('#profile-avatar').innerHTML = avatar(avatarSeed); });
   $('[data-login-google]')?.addEventListener('click', () => signInGoogle('profile'));
   $('#cancel-name').onclick = () => dialog.close();
   $('#rename-form').onsubmit = event => {
@@ -308,9 +308,9 @@ function editLocation(type, index) {
 function rules() {
   const r = state.room, host = r.hostId === state.uid, d = state.draft || r.settings;
   return `<section class="panel settings"><div class="section-heading"><h2>Set the scene</h2><span>${host ? 'HOST CONTROLS' : 'HOUSE RULES'}</span></div>${host ? `<form id="rules-form">
-    <label for="minutes">ROUND LENGTH <output id="minutes-label">${d.minutes} min</output></label><input type="range" id="minutes" min="2" max="20" value="${d.minutes}"><p class="fineprint">Choose between 2 and 20 minutes.</p>
+    <label for="minutes">ROUND LENGTH <output id="minutes-label">${d.minutes} min</output></label><input type="range" id="minutes" min="2" max="20" step="1" value="${d.minutes}" aria-valuetext="${d.minutes} minutes" style="--range-progress: ${(d.minutes - 2) / 18 * 100}%"><p class="fineprint">Choose between 2 and 20 minutes.</p>
     <label for="voting">VOTING RULE</label><select id="voting"><option value="majority" ${d.voting === 'majority' ? 'selected' : ''}>Majority wins</option><option value="unanimous" ${d.voting === 'unanimous' ? 'selected' : ''}>Everyone except the accused</option></select>
-    <label for="spies">NUMBER OF SPIES</label><select id="spies">${Array.from({ length: MAX_SPIES }, (_, i) => `<option value="${i + 1}" ${d.spies === i + 1 ? 'selected' : ''}>${spyLabel(i + 1)} · ${requiredPlayers(i + 1)}+ players</option>`).join('')}</select><p class="fineprint">Multi-spy games need 4 players per spy. Catch every spy to win. Caught spies stop voting and guessing. A wrong accusation or a correct spy guess wins for the spies; a wrong guess wins for the group.</p>
+    <label for="spies">NUMBER OF SPIES</label><select id="spies">${Array.from({ length: MAX_SPIES }, (_, i) => `<option value="${i + 1}" ${d.spies === i + 1 ? 'selected' : ''}>${spyLabel(i + 1)} · ${requiredPlayers(i + 1)}+ players</option>`).join('')}</select><p class="fineprint">Catch every spy to win. Caught spies sit out.</p>
     <label for="location-set">LOCATION SET</label><select id="location-set">${LOCATION_SETS.map(set => `<option value="${set.id}" ${locationSetId(d.locations) === set.id ? 'selected' : ''}>${set.name}</option>`).join('')}${locationSetId(d.locations) === 'custom' ? '<option value="custom" selected>Custom selection</option>' : ''}</select><p class="fineprint">Choosing a set replaces the list below. Add, edit, or remove locations to make it your own.</p>
     <div class="location-editor-heading">POSSIBLE LOCATIONS <span>${d.locations.length}/40 · minimum 3</span></div>
     <div class="location-editor">${d.locations.map((location, i) => `<div class="location-row"><input class="location-input" aria-label="Location ${i + 1}" maxlength="40" value="${esc(location)}" required><button type="button" class="remove-location" data-action="remove-location" data-index="${i}" aria-label="Remove ${esc(location)}" ${d.locations.length <= 3 ? 'disabled' : ''}>×</button></div>`).join('')}</div>
@@ -321,7 +321,7 @@ function rules() {
 function lobby() {
   const r = state.room, host = r.hostId === state.uid;
   const minimum = requiredPlayers(r.settings.spies), needed = minimum - r.players.length;
-  shell(`<div class="lobby-intro"><span class="eyebrow">THE LOBBY</span><h1>The usual suspects.</h1><p>${host ? 'Scan the code. Take your place.' : 'You’re in. Your host will start the round.'}</p></div>
+  shell(`<div class="lobby-intro"><span class="eyebrow">THE LOBBY</span><h1>The usual suspects.</h1><p>${host ? 'Scan the code. Take your place.' : 'You’re in. Your host will start the round.'}<br>Best played with 4 or more people.</p></div>
     <section class="invite panel" aria-label="Invite friends"><div><label>INVITE YOUR FRIENDS</label><strong class="room-code">${esc(state.code)}</strong><button class="text-button" data-action="share">${icon('copy', 16)} Copy invite link</button></div><canvas id="qr" aria-label="Scan to join this room" role="img"></canvas></section>
     <div class="tabs lobby-tabs" role="tablist" aria-label="Lobby sections"><button role="tab" aria-selected="${state.tab === 'players'}" data-action="players">Players <span>${r.players.length}/${MAX_PLAYERS}</span></button><button role="tab" aria-selected="${state.tab === 'rules'}" data-action="rules">Game rules ${icon('clock', 16)}</button></div>
     ${state.tab === 'players' ? `<section class="roster player-grid lobby-roster" aria-label="Players">${playerList()}</section>${needed > 0 ? `<p class="waiting">Waiting for ${needed} more ${needed === 1 ? 'player' : 'players'} for ${spyLabel(r.settings.spies)}…</p>` : ''}<div class="round-summary">${icon('clock', 16)} ${r.settings.minutes} min <span>·</span> ${r.settings.locations.length} locations <span>·</span> ${spyLabel(r.settings.spies)}</div>` : rules()}
@@ -504,6 +504,8 @@ $('#app').addEventListener('input', event => {
   if (event.target.closest('#rules-form')) {
     state.draft = readRulesForm();
     $('#minutes-label').textContent = `${state.draft.minutes} min`;
+    $('#minutes').style.setProperty('--range-progress', `${(state.draft.minutes - 2) / 18 * 100}%`);
+    $('#minutes').setAttribute('aria-valuetext', `${state.draft.minutes} minutes`);
   }
 });
 $('#app').addEventListener('submit', event => {
