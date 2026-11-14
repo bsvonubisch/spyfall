@@ -11,7 +11,11 @@ test('catching a spy during a multi-spy round sounds once, never on refresh or a
   assert.equal(caughtSpyCue(caught, { ...caught, caughtIds: ['spy-one', 'spy-two'] }), true);
   assert.equal(caughtSpyCue(before, { ...caught, roundId: 2 }), false);
   assert.equal(caughtSpyCue({ ...before, status: 'lobby' }, caught), false);
-  assert.equal(caughtSpyCue(before, { ...caught, status: 'ended' }), false, 'the final catch uses the resolved result cue');
+  assert.equal(
+    caughtSpyCue(before, { ...caught, status: 'ended' }),
+    false,
+    'the final catch uses the resolved result cue',
+  );
   assert.equal(caughtSpyCue(before, { ...caught, caughtIds: [] }), false);
 });
 

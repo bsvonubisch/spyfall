@@ -1,4 +1,9 @@
-export const googleAccount = user => Boolean(user && !user.isAnonymous && user.providerData?.some(provider => provider.providerId === 'google.com'));
+export const googleAccount = (user) =>
+  Boolean(
+    user &&
+    !user.isAnonymous &&
+    user.providerData?.some((provider) => provider.providerId === 'google.com'),
+  );
 
 // UI convenience only. Firestore independently checks the signed token claim.
 export async function adminAccount(user, forceRefresh = false) {

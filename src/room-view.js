@@ -10,7 +10,14 @@ export function membershipState(snapshot, uid) {
 
 // Room-specific UI must not follow a player into a different room.
 export function resetRoomView(state) {
-  Object.assign(state, { room: null, role: null, loading: false, draft: null, reveal: false, tab: 'players' });
+  Object.assign(state, {
+    room: null,
+    role: null,
+    loading: false,
+    draft: null,
+    reveal: false,
+    tab: 'players',
+  });
 }
 export function lobbyReadiness(room, uid, draft = null) {
   const settings = room.hostId === uid && draft ? draft : room.settings;

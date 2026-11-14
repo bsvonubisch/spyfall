@@ -104,6 +104,14 @@ pnpm dev
 
 Open the printed local URL. The normal development build connects to the configured Firebase project, so deploy rules first or use emulators below. For QR joining across phones, use the deployed HTTPS site; a localhost URL only works on the computer serving it.
 
+### Code formatting
+
+Run `pnpm format` to format the repository and `pnpm format:check` to check it without changing files. The pinned Prettier version and `.prettierrc.json` keep formatting consistent across editors and computers. The shared style uses two spaces, single quotes in JavaScript, a 100-character print width, and LF line endings.
+
+Generated dependencies, build output, the package-manager lockfile, local environment files, and audio assets are excluded through `.prettierignore`. GitHub checks formatting before running the tests and build.
+
+`firestore.rules` is also excluded: Prettier has no built-in Firestore parser, and the available rules plugin cannot parse this file. The emulator tests continue to validate the rules. SVG assets and `.firebaserc` use explicit HTML and JSON parsers.
+
 ## Test without touching production
 
 Run fast unit checks with `pnpm test`. Install Java 21+ for the Firestore emulator, then run the complete suite:

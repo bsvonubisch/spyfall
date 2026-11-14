@@ -2,7 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { lobbyReadiness, resetRoomView, membershipState } from '../../src/room-view.js';
 
-const room = (count, spies = 1) => ({ hostId: 'p0', memberIds: Array.from({ length: count }, (_, i) => `p${i}`), settings: { spies, minutes: 8, locations: ['Beach', 'Hotel', 'Train'] } });
+const room = (count, spies = 1) => ({
+  hostId: 'p0',
+  memberIds: Array.from({ length: count }, (_, i) => `p${i}`),
+  settings: { spies, minutes: 8, locations: ['Beach', 'Hotel', 'Train'] },
+});
 
 test('the host preview follows unsaved spies, including when players arrive or leave', () => {
   const draft = { ...room(1).settings, spies: 2 };
@@ -22,18 +26,33 @@ test('guests see saved rules; saving removes any difference between host and gue
 });
 
 test('leaving a room clears the old rules tab, draft and revealed role but keeps the account', () => {
-  const state = { uid: 'p0', tab: 'rules', draft: { spies: 3 }, room: room(12), role: { location: 'Beach' }, reveal: true, loading: true };
+  const state = {
+    uid: 'p0',
+    tab: 'rules',
+    draft: { spies: 3 },
+    room: room(12),
+    role: { location: 'Beach' },
+    reveal: true,
+    loading: true,
+  };
   resetRoomView(state);
   assert.equal(state.uid, 'p0');
   assert.equal(state.tab, 'players');
-  assert.equal(state.draft, null); assert.equal(state.role, null); assert.equal(state.room, null);
-  assert.equal(state.reveal, false); assert.equal(state.loading, false);
+  assert.equal(state.draft, null);
+  assert.equal(state.role, null);
+  assert.equal(state.room, null);
+  assert.equal(state.reveal, false);
+  assert.equal(state.loading, false);
   state.room = room(2);
   assert.equal(lobbyReadiness(state.room, state.uid, state.draft).settings.spies, 1);
 });
 
 test('only confirmed server snapshots remove membership, including a missing cached room', () => {
-  const snapshot = (exists, ids, metadata) => ({ exists: () => exists, data: () => ({ memberIds: ids }), metadata });
+  const snapshot = (exists, ids, metadata) => ({
+    exists: () => exists,
+    data: () => ({ memberIds: ids }),
+    metadata,
+  });
   assert.equal(membershipState(snapshot(false, [], { fromCache: true }), 'p0'), 'pending');
   assert.equal(membershipState(snapshot(true, ['p0'], { fromCache: true }), 'p0'), 'joined');
   assert.equal(membershipState(snapshot(true, [], { hasPendingWrites: true }), 'p0'), 'pending');

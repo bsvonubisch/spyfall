@@ -1,8 +1,12 @@
 // Use consecutive confirmed room snapshots, never a first load or local write.
 export function caughtSpyCue(previous, next) {
-  return Boolean(previous && previous.roundId === next.roundId
-    && ['active', 'accusing'].includes(previous.status) && next.status === 'active'
-    && next.caughtIds.some(id => !previous.caughtIds.includes(id)));
+  return Boolean(
+    previous &&
+    previous.roundId === next.roundId &&
+    ['active', 'accusing'].includes(previous.status) &&
+    next.status === 'active' &&
+    next.caughtIds.some((id) => !previous.caughtIds.includes(id)),
+  );
 }
 
 export function resultCue(result) {

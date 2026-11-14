@@ -1,4 +1,10 @@
-import { GoogleAuthProvider, linkWithPopup, signInWithPopup, signInWithCredential, signOut } from 'firebase/auth';
+import {
+  GoogleAuthProvider,
+  linkWithPopup,
+  signInWithPopup,
+  signInWithCredential,
+  signOut,
+} from 'firebase/auth';
 import { auth, identity } from './firebase.js';
 
 export { googleAccount, adminAccount } from './admin-access.js';
@@ -10,7 +16,9 @@ export async function connectGoogle() {
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
   try {
-    const result = linking ? await linkWithPopup(user, provider) : await signInWithPopup(auth, provider);
+    const result = linking
+      ? await linkWithPopup(user, provider)
+      : await signInWithPopup(auth, provider);
     await result.user.getIdToken(true);
     return { user: result.user, linked: linking };
   } catch (error) {
@@ -31,13 +39,18 @@ export async function returnToGuest() {
   return identity();
 }
 export function accountError(error) {
-  return ({
-    'auth/popup-blocked': 'Allow the Google sign-in popup, then try again.',
-    'auth/popup-closed-by-user': 'Sign-in was cancelled. You can keep playing as a guest.',
-    'auth/cancelled-popup-request': 'Sign-in was cancelled. Please try again.',
-    'auth/operation-not-allowed': 'Google sign-in must be enabled in Firebase Authentication.',
-    'auth/unauthorized-domain': 'This address needs to be added to Firebase Authentication’s authorized domains.',
-    'auth/network-request-failed': 'Could not connect to Google. Check your connection and try again.',
-    'auth/account-exists-with-different-credential': 'This email already uses another sign-in method. Use that account’s sign-in method first.'
-  })[error.code] || 'Could not sign in. Please try again.';
+  return (
+    {
+      'auth/popup-blocked': 'Allow the Google sign-in popup, then try again.',
+      'auth/popup-closed-by-user': 'Sign-in was cancelled. You can keep playing as a guest.',
+      'auth/cancelled-popup-request': 'Sign-in was cancelled. Please try again.',
+      'auth/operation-not-allowed': 'Google sign-in must be enabled in Firebase Authentication.',
+      'auth/unauthorized-domain':
+        'This address needs to be added to Firebase Authentication’s authorized domains.',
+      'auth/network-request-failed':
+        'Could not connect to Google. Check your connection and try again.',
+      'auth/account-exists-with-different-credential':
+        'This email already uses another sign-in method. Use that account’s sign-in method first.',
+    }[error.code] || 'Could not sign in. Please try again.'
+  );
 }

@@ -1,0 +1,15 @@
+# Generated dependencies and build output
+node_modules/
+dist/
+.firebase/
+coverage/
+pnpm-lock.yaml
+
+# Local configuration, logs, and binary assets
+.env*
+*-debug.log*
+src/assets/
+
+# Prettier has no built-in parser for Firestore rules. The available plugin
+# cannot parse these valid rules; the Firebase emulator validates them instead.
+firestore.rules

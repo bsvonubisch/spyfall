@@ -9,8 +9,10 @@ export function bindDialogViewport(dialog, viewport = window.visualViewport) {
       dialog.style.setProperty('--modal-height', `${viewport?.height || window.innerHeight}px`);
       const field = document.activeElement;
       if (dialog.open && dialog.contains(field) && field.matches('input, textarea, select')) {
-        const bounds = dialog.getBoundingClientRect(), input = field.getBoundingClientRect();
-        if (input.bottom > bounds.bottom - 16) dialog.scrollTop += input.bottom - bounds.bottom + 16;
+        const bounds = dialog.getBoundingClientRect(),
+          input = field.getBoundingClientRect();
+        if (input.bottom > bounds.bottom - 16)
+          dialog.scrollTop += input.bottom - bounds.bottom + 16;
         else if (input.top < bounds.top + 16) dialog.scrollTop -= bounds.top + 16 - input.top;
       }
     });

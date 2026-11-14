@@ -1,0 +1,11 @@
+{
+  "singleQuote": true,
+  "printWidth": 100,
+  "tabWidth": 2,
+  "trailingComma": "all",
+  "endOfLine": "lf",
+  "overrides": [
+    { "files": ".firebaserc", "options": { "parser": "json" } },
+    { "files": "*.svg", "options": { "parser": "html" } }
+  ]
+}
