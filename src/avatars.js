@@ -1,3 +1,16 @@
+export function safeAvatarUrl(value) {
+  if (typeof value !== 'string' || value.length > 2048) return '';
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && /^[a-zA-Z0-9-]+\.googleusercontent\.com$/.test(url.hostname) && !url.username && !url.password && !url.port ? url.href : '';
+  } catch { return ''; }
+}
+export function playerAvatar(player) {
+  const image = safeAvatarUrl(player.avatarUrl);
+  const escaped = image.replace(/[&"<>]/g, char => ({'&':'&amp;','"':'&quot;','<':'&lt;','>':'&gt;'})[char]);
+  return `${avatar(player.avatarSeed || player.id)}${image ? `<img class="google-avatar" src="${escaped}" alt="" referrerpolicy="no-referrer" loading="lazy" decoding="async">` : ''}`;
+}
+
 // Stable, randomized-looking portraits derived only from player ID, never role.
 export function avatar(id) {
   let seed = 2166136261;

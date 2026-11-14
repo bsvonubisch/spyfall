@@ -3,7 +3,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
 import { doc, getDoc, getDocs, collection, updateDoc, setDoc, writeBatch, serverTimestamp, query, orderBy, limit, Timestamp, onSnapshot, disableNetwork, enableNetwork } from 'firebase/firestore';
-import { settleRound, awardResult } from '../src/scores.js';
+import { settleRound, awardResult, updateProfile } from '../src/scores.js';
+import { loadAdminStats, watchLiveStats } from '../src/admin.js';
+import { initializeApp, deleteApp } from 'firebase/app';
+import { getAuth, connectAuthEmulator, signInAnonymously, linkWithCredential, GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
+import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { execute, DEFAULT_SETTINGS, resolveResult, validSettings, eligiblePlayers, threshold } from '../src/game.js';
 import { membershipState } from '../src/room-view.js';
 
@@ -23,6 +27,102 @@ async function start(code) {
   const roles = await Promise.all(room.memberIds.map(async id => ({ id, ...(await getDoc(doc(db(id), 'rooms', code, 'roles', id))).data() })));
   return { room, roles, spy: roles.find(r => r.isSpy), civilian: roles.find(r => !r.isSpy) };
 }
+
+const ownerClaims = { email: 'owner@example.com', email_verified: true, firebase: { sign_in_provider: 'google.com', identities: { 'google.com': ['owner-google-id'] } } };
+const ownerDb = () => env.authenticatedContext('owner', ownerClaims).firestore();
+const usageEvent = (uid = 'p0') => ({ uid, type: 'visit', sessionId: crypto.randomUUID(), screen: 'home', roomCode: '', roundId: 0, device: 'mobile', source: 'client', createdAt: serverTimestamp() });
+
+test('linking a Google identity retains the guest UID, profile, and saved locations; existing accounts can be restored', async () => {
+  const app = initializeApp({ apiKey: 'demo-key', projectId: 'demo-spyfall' }, crypto.randomUUID());
+  try {
+    const auth = getAuth(app); connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+    const firestore = getFirestore(app); connectFirestoreEmulator(firestore, '127.0.0.1', 8080);
+    const guest = (await signInAnonymously(auth)).user;
+    const code = (await execute(firestore, guest.uid, { action: 'create', name: 'Guest' })).code;
+    const locations = ['Bakery', 'Garden', 'School'];
+    await execute(firestore, guest.uid, { action: 'settings', code, settings: { ...DEFAULT_SETTINGS, locations } });
+    const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
+    const jwt = `${encode({ alg: 'none' })}.${encode({ sub: crypto.randomUUID(), email: `qa-${crypto.randomUUID()}@example.test`, email_verified: true, name: 'Google test', picture: 'https://lh3.googleusercontent.com/a/test-photo', iss: 'https://accounts.google.com', aud: 'demo-spyfall', iat: Math.floor(Date.now()/1000), exp: Math.floor(Date.now()/1000)+3600 })}.`;
+    const credential = GoogleAuthProvider.credential(jwt);
+    const linked = (await linkWithCredential(guest, credential)).user;
+    assert.equal(linked.uid, guest.uid); assert.equal(linked.isAnonymous, false);
+    await linked.getIdToken(true);
+    assert.deepEqual((await getDoc(doc(firestore, 'profiles', linked.uid, 'preferences', 'game'))).data().locations, locations);
+    assert.equal((await getDoc(doc(firestore, 'profiles', linked.uid))).data().name, 'Guest');
+    assert.ok((await linked.getIdTokenResult()).claims.firebase.identities['google.com']);
+    const restored = (await signInWithCredential(auth, credential)).user;
+    assert.equal(restored.uid, guest.uid);
+  } finally { await deleteApp(app); }
+});
+
+test('only the verified Google owner can query admin data, without access to private active roles', async () => {
+  const code = await lobby(2); const { spy } = await start(code);
+  for (const claims of [{}, { ...ownerClaims, email_verified: false }, { ...ownerClaims, email: 'other@example.com' }, { ...ownerClaims, firebase: { sign_in_provider: 'anonymous', identities: {} } }]) {
+    const outsider = env.authenticatedContext('outsider', claims).firestore();
+    for (const path of ['profiles', 'rooms', 'results', 'usage', 'presence']) await assertFails(getDocs(collection(outsider, path)));
+  }
+  const admin = ownerDb();
+  for (const path of ['profiles', 'rooms', 'results', 'usage', 'presence']) await assertSucceeds(getDocs(collection(admin, path)));
+  await assertFails(getDoc(doc(admin, 'rooms', code, 'roles', spy.id)));
+  await assertFails(getDoc(doc(admin, 'rooms', code, 'secrets', 'current')));
+  // A newly linked anonymous identity may retain its original sign-in provider in the token.
+  const linked = env.authenticatedContext('owner', { ...ownerClaims, firebase: { ...ownerClaims.firebase, sign_in_provider: 'anonymous' } }).firestore();
+  await assertSucceeds(getDocs(collection(linked, 'rooms')));
+});
+test('Google photos persist through rooms and awards; changing a profile cannot change its scores', async () => {
+  const photo = 'https://lh3.googleusercontent.com/a/test-photo=s96-c';
+  await updateProfile(db('p0'), 'p0', { name: 'Google Agent', avatarSeed: 'portrait-1', avatarUrl: photo });
+  const code = await lobby(2);
+  assert.equal((await getDoc(doc(db('p0'), 'rooms', code))).data().players.p0.avatarUrl, photo);
+  await start(code); await execute(db('p0'), 'p0', { action: 'end', code }); await settleRound(db('p0'), 'p0', code);
+  const before = (await getDoc(doc(db('p0'), 'profiles', 'p0'))).data();
+  assert.equal((await getDoc(doc(db('p0'), 'rooms', code, 'scores', 'p0'))).data().avatarUrl, photo);
+  await updateProfile(db('p0'), 'p0', { name: 'New name', avatarSeed: 'portrait-2', avatarUrl: '' });
+  const after = (await getDoc(doc(db('p0'), 'profiles', 'p0'))).data();
+  assert.equal(after.gamesPlayed, before.gamesPlayed); assert.equal(after.wins, before.wins);
+  for (const avatarUrl of ['javascript:alert(1)', 'https://evil.example/photo', 'https://lh3.googleusercontent.com.evil.example/a', 'http://lh3.googleusercontent.com/a']) await assertFails(updateDoc(doc(db('p0'), 'profiles', 'p0'), { avatarUrl, updatedAt: serverTimestamp() }));
+  await assertFails(updateProfile(db('p1'), 'p0', { name: 'Impostor', avatarUrl: photo }));
+});
+test('saving locations creates private preferences reused in the next hosted room', async () => {
+  const code = await lobby(2), locations = ['Garden', 'Bakery', 'Bus stop'];
+  await execute(db('p0'), 'p0', { action: 'settings', code, settings: { ...DEFAULT_SETTINGS, locations } });
+  assert.deepEqual((await getDoc(doc(db('p0'), 'profiles', 'p0', 'preferences', 'game'))).data().locations, locations);
+  const next = (await execute(db('p0'), 'p0', { action: 'create', name: 'Player 0' })).code;
+  assert.deepEqual((await getDoc(doc(db('p0'), 'rooms', next))).data().settings.locations, locations);
+  const other = (await execute(db('p1'), 'p1', { action: 'create', name: 'Player 1' })).code;
+  assert.deepEqual((await getDoc(doc(db('p1'), 'rooms', other))).data().settings.locations, DEFAULT_SETTINGS.locations);
+  await assertFails(getDoc(doc(db('p1'), 'profiles', 'p0', 'preferences', 'game')));
+  await assertFails(setDoc(doc(db('p1'), 'profiles', 'p0', 'preferences', 'game'), { locations, updatedAt: serverTimestamp() }));
+  await assertFails(setDoc(doc(db('p0'), 'profiles', 'p0', 'preferences', 'game'), { locations: ['Too few'], updatedAt: serverTimestamp() }));
+});
+test('usage events are immutable, contain no secret fields, and are private to admin queries', async () => {
+  const event = usageEvent(), ref = doc(db('p0'), 'usage', 'valid-event');
+  await assertSucceeds(setDoc(ref, event));
+  await assertFails(updateDoc(ref, { type: 'vote_cast' }));
+  await assertFails(getDoc(doc(db('p1'), 'usage', 'valid-event')));
+  for (const extra of [{ uid: 'p1' }, { source: 'backfill' }, { location: 'Beach' }, { role: 'spy' }, { createdAt: Timestamp.fromMillis(0) }, { type: 'unknown' }]) await assertFails(setDoc(doc(db('p0'), 'usage', crypto.randomUUID()), { ...event, ...extra }));
+  const stats = await loadAdminStats(ownerDb());
+  assert.equal(stats.usage.find(item => item.type === 'visit').count, 1);
+  assert.equal(stats.days.reduce((sum, day) => sum + day.count, 0), 1);
+  await assert.rejects(loadAdminStats(db('p0')));
+});
+test('live stats require membership, deduplicate sessions, and exclude inactive or stale users', async () => {
+  const code = await lobby(2), sessionId = crypto.randomUUID();
+  const record = { uid: 'p0', sessionId, roomCode: code, screen: 'lobby', active: true, updatedAt: serverTimestamp() };
+  await assertSucceeds(setDoc(doc(db('p0'), 'presence', `${sessionId}_p0`), record));
+  await assertFails(setDoc(doc(db('outsider'), 'presence', `${sessionId}_outsider`), { ...record, uid: 'outsider' }));
+  await assertFails(updateDoc(doc(db('p1'), 'presence', `${sessionId}_p0`), { ...record, uid: 'p1' }));
+  await env.withSecurityRulesDisabled(async context => {
+    const admin = context.firestore();
+    await setDoc(doc(admin, 'presence', 'second-tab'), record);
+    await setDoc(doc(admin, 'presence', 'inactive'), { ...record, uid: 'p1', active: false });
+    await setDoc(doc(admin, 'presence', 'stale'), { ...record, uid: 'old', updatedAt: Timestamp.fromMillis(Date.now() - 240000) });
+  });
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { stop(); reject(new Error('Live stats timed out')); }, 8000);
+    const stop = watchLiveStats(ownerDb(), live => { try { assert.equal(live.users, 1); assert.equal(live.rooms, 1); clearTimeout(timer); stop(); resolve(); } catch (error) { clearTimeout(timer); stop(); reject(error); } }, reject);
+  });
+});
 
 test('profiles persist and only their owner can rename; leaderboard queries are bounded', async () => {
   const code = await lobby(2);

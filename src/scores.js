@@ -1,7 +1,13 @@
 import { doc, runTransaction, serverTimestamp } from 'firebase/firestore';
 
 export function profileData(id, name) {
-  return { id, name, avatarSeed: id, wins: 0, gamesPlayed: 0, lastRoundKey: '', updatedAt: serverTimestamp() };
+  return { id, name, avatarSeed: id, avatarUrl: '', wins: 0, gamesPlayed: 0, lastRoundKey: '', updatedAt: serverTimestamp() };
+}
+export async function updateProfile(db, uid, { name, avatarSeed, avatarUrl = '' }) {
+  return runTransaction(db, async tx => {
+    const ref = doc(db, 'profiles', uid), snap = await tx.get(ref);
+    tx.set(ref, { ...(snap.data() || profileData(uid, name)), name, avatarSeed: avatarSeed || snap.data()?.avatarSeed || uid, avatarUrl, updatedAt: serverTimestamp() });
+  });
 }
 export async function saveProfile(db, uid, name) {
   const ref = doc(db, 'profiles', uid);
@@ -46,8 +52,8 @@ export async function awardResult(db, result, id) {
     const won = result.winnerIds.includes(id), name = result.players[id].name;
     const increment = snap => ({ wins: (snap.data()?.wins || 0) + Number(won), gamesPlayed: (snap.data()?.gamesPlayed || 0) + 1,
       lastRoundKey: result.key, updatedAt: serverTimestamp() });
-    tx.set(profile, { id, name: profileSnap.data()?.name || name, avatarSeed: profileSnap.data()?.avatarSeed || result.players[id].avatarSeed || id, ...increment(profileSnap) });
-    tx.set(score, { id, name, avatarSeed: result.players[id].avatarSeed || id, ...increment(scoreSnap) });
+    tx.set(profile, { id, name: profileSnap.data()?.name || name, avatarSeed: profileSnap.data()?.avatarSeed || result.players[id].avatarSeed || id, avatarUrl: profileSnap.exists() ? profileSnap.data().avatarUrl || '' : result.players[id].avatarUrl || '', ...increment(profileSnap) });
+    tx.set(score, { id, name, avatarSeed: result.players[id].avatarSeed || id, avatarUrl: result.players[id].avatarUrl || '', ...increment(scoreSnap) });
     tx.set(award, { won, createdAt: serverTimestamp() });
   });
 }

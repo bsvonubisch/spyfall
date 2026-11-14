@@ -2,8 +2,9 @@ export const DEFAULT_LOCATIONS = ['Airport', 'Beach', 'Casino', 'Circus', 'Cruis
 export const LOCATION_SETS = [
   { id: 'classic', name: 'Classic · default', locations: DEFAULT_LOCATIONS },
   { id: 'everyday', name: 'Everyday places', locations: ['Bakery', 'Barber shop', 'Bookshop', 'Bus stop', 'Café', 'Dentist', 'Gym', 'Library', 'Office', 'Park', 'Pharmacy', 'Post office', 'Shopping mall', 'Swimming pool', 'Veterinary clinic'] },
-  { id: 'travel', name: 'Around the world', locations: ['Airport lounge', 'Campsite', 'Desert oasis', 'Ferry', 'Harbor', 'Jungle lodge', 'Mountain cabin', 'Safari park', 'Ski resort', 'Souvenir shop', 'Theme park', 'Tour bus', 'Train station', 'Tropical island', 'Youth hostel'] },
-  { id: 'adventure', name: 'Wild adventures', locations: ['Ancient temple', 'Castle', 'Dragon cave', 'Haunted mansion', 'Jungle', 'Lighthouse', 'Moon base', 'Pirate ship', 'Secret laboratory', 'Spaceship', 'Underwater city', 'Volcano', 'Wild West saloon', 'Wizard school', 'Zombie bunker'] },
+  { id: 'outings', name: 'Out and about', locations: ['Cinema', 'Food court', 'Train station', 'Bus stop', 'Beach', 'Playground', 'Public park', 'Restaurant', 'Ice cream shop', 'Shopping street', 'Market', 'Bowling alley', 'Sports field', 'Swimming pool', 'Museum', 'Car park', 'Pet shop', 'Pizza place'] },
+  { id: 'social', name: 'Friends & weekends', locations: ['Birthday party', 'Barbecue', 'Living room', 'Kitchen', 'Garden', 'Café', 'Pub', 'Wedding reception', 'Picnic area', 'Concert', 'Restaurant', 'Campsite', 'Sports club', 'Community center', 'Dance floor', 'Cinema', 'Playground', 'Beach'] },
+  { id: 'errands', name: 'Everyday errands', locations: ['Supermarket', 'Bakery', 'Pharmacy', 'Post office', 'Bank', 'Hair salon', 'Doctor’s waiting room', 'Dentist', 'Petrol station', 'Car wash', 'Clothing shop', 'Shoe shop', 'Hardware store', 'Bookshop', 'Flower shop', 'Optician', 'Laundry room', 'Bus stop'] },
 ];
 export function locationSetId(locations) {
   return LOCATION_SETS.find(set => set.locations.length === locations.length && set.locations.every((location, i) => location === locations[i]))?.id || 'custom';

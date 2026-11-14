@@ -2,6 +2,11 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
+    function admin() {
+      return signedIn() && request.auth.token.get('email', '') == 'owner@example.com'
+        && request.auth.token.get('email_verified', false) == true
+        && request.auth.token.firebase.get('identities', {}).keys().hasAny(['google.com']);
+    }
     function uid() { return request.auth.uid; }
     function room(code) { return get(/databases/$(database)/documents/rooms/$(code)).data; }
     function after(code) { return getAfter(/databases/$(database)/documents/rooms/$(code)).data; }
@@ -15,10 +20,41 @@ service cloud.firestore {
     function archived(r) { return r.status != 'ended' || !('roundKey' in r) || exists(/databases/$(database)/documents/results/$(r.roundKey)); }
     function validName(n) { return n is string && n.size() >= 1 && n.size() <= 20; }
     function validAvatar(s, id) { return s.get('avatarSeed',id) is string && s.get('avatarSeed',id).size() >= 1 && s.get('avatarSeed',id).size() <= 64; }
+    function validPhoto(s) {
+      let url = s.get('avatarUrl', '');
+      return url is string && (url == '' || url.size() <= 2048 && url.matches('^https://[a-zA-Z0-9-]+[.]googleusercontent[.]com/[^<>" ]+$'));
+    }
     function validStats(s, id) {
-      return s.keys().hasOnly(['id','name','avatarSeed','wins','gamesPlayed','lastRoundKey','updatedAt']) && s.id == id && validName(s.name) && validAvatar(s,id)
+      return s.keys().hasOnly(['id','name','avatarSeed','avatarUrl','wins','gamesPlayed','lastRoundKey','updatedAt']) && s.id == id && validName(s.name) && validAvatar(s,id) && validPhoto(s)
         && s.wins is int && s.gamesPlayed is int && s.wins >= 0 && s.gamesPlayed >= s.wins
         && s.lastRoundKey is string && s.updatedAt == request.time;
+    }
+    match /usage/{eventId} {
+      allow get: if admin() || signedIn() && resource.data.uid == uid();
+      allow list: if admin();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['type','uid','sessionId','screen','roomCode','roundId','device','source','createdAt'])
+        && request.resource.data.uid == uid() && request.resource.data.source == 'client'
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.sessionId is string && request.resource.data.sessionId.matches('^[a-f0-9-]{36}$')
+        && request.resource.data.screen in ['home','lobby','round','result','loading']
+        && request.resource.data.device in ['mobile','desktop']
+        && request.resource.data.roomCode is string && request.resource.data.roomCode.matches('^([A-Z2-9]{6})?$')
+        && request.resource.data.roundId is int && request.resource.data.roundId >= 0
+        && request.resource.data.type in ['visit','screen_view','room_created','room_joined','round_started','vote_cast','guess_submitted','round_ended','round_cancelled','room_left','rules_saved','profile_saved','google_signin','invite_copied','role_revealed','question_idea','leaderboard_opened','location_set'];
+    }
+    match /presence/{session} {
+      allow get: if admin() || signedIn() && resource.data.uid == uid();
+      allow list: if admin();
+      allow create, update: if signedIn()
+        && request.resource.data.keys().hasOnly(['uid','sessionId','roomCode','screen','active','updatedAt'])
+        && request.resource.data.uid == uid()
+        && request.resource.data.sessionId.matches('^[a-f0-9-]{36}$')
+        && session == request.resource.data.sessionId + '_' + uid()
+        && request.resource.data.screen in ['home','lobby','round','result','loading']
+        && request.resource.data.active is bool && request.resource.data.updatedAt == request.time
+        && request.resource.data.roomCode.matches('^([A-Z2-9]{6})?$')
+        && (!request.resource.data.active || request.resource.data.roomCode == '' || member(room(request.resource.data.roomCode)));
     }
     function awardAllowed(key, id) {
       let result = get(/databases/$(database)/documents/results/$(key)).data;
@@ -34,18 +70,28 @@ service cloud.firestore {
         && next.wins == old.get('wins',0) + (id in result.winnerIds ? 1 : 0);
     }
     match /profiles/{id} {
+      match /preferences/{key} {
+        allow get: if signedIn() && uid() == id;
+        allow create, update: if signedIn() && uid() == id && key == 'game'
+          && request.resource.data.keys().hasOnly(['locations', 'updatedAt'])
+          && request.resource.data.updatedAt == request.time
+          && validSettings({'minutes':8, 'voting':'majority', 'spies':1, 'locations':request.resource.data.locations});
+      }
       allow get: if signedIn();
-      allow list: if signedIn() && request.query.limit <= 50;
+      allow list: if admin() || signedIn() && request.query.limit <= 50;
       allow create: if signedIn() && validStats(request.resource.data,id) && (
         uid() == id && request.resource.data.wins == 0 && request.resource.data.gamesPlayed == 0 && request.resource.data.lastRoundKey == ''
         || statsIncrement({},request.resource.data,id) && request.resource.data.name == get(/databases/$(database)/documents/results/$(request.resource.data.lastRoundKey)).data.players[id].name
-          && request.resource.data.get('avatarSeed',id) == get(/databases/$(database)/documents/results/$(request.resource.data.lastRoundKey)).data.players[id].get('avatarSeed',id));
+          && request.resource.data.get('avatarSeed',id) == get(/databases/$(database)/documents/results/$(request.resource.data.lastRoundKey)).data.players[id].get('avatarSeed',id)
+          && request.resource.data.get('avatarUrl','') == get(/databases/$(database)/documents/results/$(request.resource.data.lastRoundKey)).data.players[id].get('avatarUrl',''));
       allow update: if signedIn() && validStats(request.resource.data,id) && (
-        uid() == id && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name','avatarSeed','updatedAt'])
-        || request.resource.data.name == resource.data.name && request.resource.data.get('avatarSeed',id) == resource.data.get('avatarSeed',id) && statsIncrement(resource.data,request.resource.data,id));
+        uid() == id && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name','avatarSeed','avatarUrl','updatedAt'])
+        || request.resource.data.name == resource.data.name && request.resource.data.get('avatarSeed',id) == resource.data.get('avatarSeed',id)
+          && request.resource.data.get('avatarUrl','') == resource.data.get('avatarUrl','') && statsIncrement(resource.data,request.resource.data,id));
     }
     match /results/{key} {
       allow get: if signedIn();
+      allow list: if admin();
       function validResult() {
         let next = request.resource.data;
         let r = room(next.code);
@@ -90,9 +136,9 @@ service cloud.firestore {
       return n == 2 ? count(r,target) >= 1 : r.settings.voting == 'unanimous' ? count(r,target) >= n - 1 : count(r,target) > n / 2;
     }
     match /rooms/{code} {
-      // A room code grants access to the non-secret lobby; listing rooms is denied.
+      // Only the verified Google owner can query rooms for the admin overview.
       allow get: if signedIn();
-      allow list: if false;
+      allow list: if admin();
       allow create: if signedIn() && code.matches('^[A-Z2-9]{6}$')
         && request.resource.data.keys().hasOnly(['hostId','memberIds','players','status','settings','roundId','votes','createdAt'])
         && request.resource.data.hostId == uid()
@@ -102,7 +148,7 @@ service cloud.firestore {
         && request.resource.data.status == 'lobby' && request.resource.data.roundId == 0
         && request.resource.data.votes == {} && request.resource.data.createdAt == request.time
         && validSettings(request.resource.data.settings);
-      function validPlayer(p) { return p.keys().hasOnly(['id','name','avatarSeed']) && p.id == uid() && validName(p.name) && validAvatar(p,uid()); }
+      function validPlayer(p) { return p.keys().hasOnly(['id','name','avatarSeed','avatarUrl']) && p.id == uid() && validName(p.name) && validAvatar(p,uid()) && validPhoto(p); }
       function changed(keys) { return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys); }
       function cleared() {
         let next = request.resource.data;
@@ -191,7 +237,8 @@ service cloud.firestore {
         function validScore(old) {
           let next = request.resource.data;
           let result = get(/databases/$(database)/documents/results/$(next.lastRoundKey)).data;
-          return result.code == code && next.name == result.players[id].name && next.get('avatarSeed',id) == result.players[id].get('avatarSeed',id) && statsIncrement(old,next,id);
+          return result.code == code && next.name == result.players[id].name && next.get('avatarSeed',id) == result.players[id].get('avatarSeed',id)
+            && next.get('avatarUrl','') == result.players[id].get('avatarUrl','') && statsIncrement(old,next,id);
         }
         allow create: if validScore({});
         allow update: if validScore(resource.data);

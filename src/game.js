@@ -2,6 +2,7 @@ import { doc, runTransaction, serverTimestamp, deleteField } from 'firebase/fire
 
 import { DEFAULT_LOCATIONS } from './locations.js';
 import { profileData, settleRound } from './scores.js';
+import { safeAvatarUrl } from './avatars.js';
 export { DEFAULT_LOCATIONS } from './locations.js';
 export const DEFAULT_SETTINGS = { minutes: 8, voting: 'majority', spies: 1, locations: DEFAULT_LOCATIONS };
 export const MAX_PLAYERS = 15;
@@ -56,9 +57,12 @@ async function executeOnce(db, uid, data) {
       const created = await runTransaction(db, async tx => {
         if ((await tx.get(ref)).exists()) return false;
         const profile = doc(db, 'profiles', uid), profileSnap = await tx.get(profile);
+        const preferences = await tx.get(doc(profile, 'preferences', 'game'));
         player.avatarSeed = profileSnap.data()?.avatarSeed || uid;
+        player.avatarUrl = profileSnap.data()?.avatarUrl || '';
         tx.set(profile, { ...(profileSnap.data() || profileData(uid, player.name)), avatarSeed: player.avatarSeed, name: player.name, updatedAt: serverTimestamp() });
-        tx.set(ref, { hostId: uid, memberIds: [uid], players: { [uid]: player }, status: 'lobby', settings: DEFAULT_SETTINGS, roundId: 0, votes: {}, createdAt: serverTimestamp() });
+        const settings = validSettings({ ...DEFAULT_SETTINGS, locations: preferences.data()?.locations || DEFAULT_LOCATIONS });
+        tx.set(ref, { hostId: uid, memberIds: [uid], players: { [uid]: player }, status: 'lobby', settings, roundId: 0, votes: {}, createdAt: serverTimestamp() });
         return true;
       });
       if (created) return { code };
@@ -80,8 +84,9 @@ async function executeOnce(db, uid, data) {
       check(!Object.values(room.players).some(p => p.name.toLowerCase() === playerName.toLowerCase()), 'That name is taken. Try another.');
       const profile = doc(db, 'profiles', uid), profileSnap = await tx.get(profile);
       const avatarSeed = profileSnap.data()?.avatarSeed || uid;
+      const avatarUrl = profileSnap.data()?.avatarUrl || '';
       tx.set(profile, { ...(profileSnap.data() || profileData(uid, playerName)), name: playerName, avatarSeed, updatedAt: serverTimestamp() });
-      tx.update(ref, { memberIds: [...room.memberIds, uid], players: { ...room.players, [uid]: { id: uid, name: playerName, avatarSeed } } });
+      tx.update(ref, { memberIds: [...room.memberIds, uid], players: { ...room.players, [uid]: { id: uid, name: playerName, avatarSeed, avatarUrl } } });
       return { code: data.code };
     }
     check(room.memberIds.includes(uid), 'You are not in this room.');
@@ -92,12 +97,16 @@ async function executeOnce(db, uid, data) {
       check(!Object.values(room.players).some(p => p.id !== uid && p.name.toLowerCase() === playerName.toLowerCase()), 'That name is taken. Try another.');
       const profile = doc(db, 'profiles', uid), profileSnap = await tx.get(profile);
       const avatarSeed = data.avatarSeed || profileSnap.data()?.avatarSeed || room.players[uid].avatarSeed || uid;
+      const avatarUrl = data.avatarUrl ?? profileSnap.data()?.avatarUrl ?? '';
+      check(avatarUrl === '' || safeAvatarUrl(avatarUrl) === avatarUrl, 'Use a Google profile photo or a generated avatar.');
       check(typeof avatarSeed === 'string' && avatarSeed.length <= 64, 'Choose another avatar.');
-      tx.set(profile, { ...(profileSnap.data() || profileData(uid, playerName)), name: playerName, avatarSeed, updatedAt: serverTimestamp() });
-      tx.update(ref, { players: { ...room.players, [uid]: { id: uid, name: playerName, avatarSeed } } });
+      tx.set(profile, { ...(profileSnap.data() || profileData(uid, playerName)), name: playerName, avatarSeed, avatarUrl, updatedAt: serverTimestamp() });
+      tx.update(ref, { players: { ...room.players, [uid]: { id: uid, name: playerName, avatarSeed, avatarUrl } } });
     } else if (type === 'settings') {
       check(room.status === 'lobby', 'Rules can only change in the lobby.');
-      tx.update(ref, { settings: validSettings(data.settings) });
+      const settings = validSettings(data.settings);
+      tx.update(ref, { settings });
+      tx.set(doc(db, 'profiles', uid, 'preferences', 'game'), { locations: settings.locations, updatedAt: serverTimestamp() });
     } else if (type === 'start') {
       const spies = room.settings.spies ?? 1;
       check(room.status === 'lobby' && room.memberIds.length >= requiredPlayers(spies), `At least ${requiredPlayers(spies)} players are needed for ${spies} ${spies === 1 ? 'spy' : 'spies'}.`);
